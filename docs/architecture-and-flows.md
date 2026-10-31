@@ -235,7 +235,7 @@ Owner dapat melihat data melalui `AttendanceAdmin`; endpoint tidak menyediakan m
 | POS: katalog layanan | `/api/services`, harga dihitung ulang di backend saat transaksi | PostgreSQL |
 | POS: produk | `/api/products` | PostgreSQL jika produk sudah dimasukkan |
 | Pembuatan transaksi | `/api/transactions` | PostgreSQL |
-| Buka/tutup shift | Endpoint shift | PostgreSQL; tombol tutup belum terhubung pada UI yang ditinjau |
+| Buka/tutup shift | `/api/shifts/open`, `/api/shifts/close` | PostgreSQL; sebelum tutup Kasir mengonfirmasi jenis dan ID sesi aktif, lalu server memverifikasi ID sesi tersebut |
 | Absensi Karyawan | `/api/attendance/me` dan endpoint check-in/out | PostgreSQL |
 | Dashboard Owner | `/api/owner/dashboard` | Query PostgreSQL; pesanan agregat tidak memakai filter periode |
 | Laporan Owner | `/api/owner/finance` | Query PostgreSQL; daftar dibatasi 200 baris |

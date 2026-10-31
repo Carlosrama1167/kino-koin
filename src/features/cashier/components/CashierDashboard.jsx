@@ -22,7 +22,7 @@ export default function CashierDashboard({ onNavigate, onCloseShift, closing = f
   const shift = data?.shift
 
   return <div className="page-stack">
-    <div className="page-intro"><div><div className="eyebrow"><span className="live-dot"/> {shift ? `SHIFT ${shift.shift_type.toUpperCase()} AKTIF` : 'SESI SHIFT TIDAK AKTIF'}</div><h2>Dashboard Kasir</h2><p>Ringkasan transaksi dan pembayaran yang tercatat pada sesi shift ini.</p></div><div className="dashboard-actions"><button className="btn btn-primary" onClick={() => onNavigate('Transaksi Baru')}><Plus size={17}/> Transaksi Baru</button>{shift && <button className="btn btn-secondary" onClick={onCloseShift} disabled={closing}>{closing ? 'Menutup shift…' : 'Tutup shift'}</button>}</div></div>
+    <div className="page-intro"><div><div className="eyebrow"><span className="live-dot"/> {shift ? `SHIFT ${shift.shift_type.toUpperCase()} AKTIF` : 'SESI SHIFT TIDAK AKTIF'}</div><h2>Dashboard Kasir</h2><p>Ringkasan transaksi dan pembayaran yang tercatat pada sesi shift ini.</p></div><div className="dashboard-actions"><button className="btn btn-primary" onClick={() => onNavigate('Transaksi Baru')}><Plus size={17}/> Transaksi Baru</button>{shift && <button className="btn btn-secondary" onClick={() => onCloseShift(shift)} disabled={closing}>{closing ? 'Menutup shift…' : 'Tutup shift'}</button>}</div></div>
     {error && <div className="checkout-error" role="alert">{error}</div>}
     <div className="owner-metrics cashier-metrics">
       <div className="owner-metric"><div className="owner-metric-icon tone-0"><Wallet size={18}/></div><small>Penerimaan shift</small><b>{loading ? 'Memuat…' : money(summary.received_total)}</b><span><ArrowUpRight size={12}/> Pembayaran tercatat</span></div>

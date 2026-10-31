@@ -893,9 +893,13 @@ try {
         json_out(['shift'=>$q->fetch()],201);
     }
     if ($method === 'POST' && $path === '/api/shifts/close') {
-        require_csrf(); $u=require_user('kasir'); $pdo=db(); $pdo->beginTransaction();
-        $q=$pdo->prepare("SELECT id,shift_type,started_at FROM shifts WHERE user_id=? AND status='open' FOR UPDATE"); $q->execute([$u['id']]); $shift=$q->fetch();
-        if (!$shift) { $pdo->rollBack(); json_out(['error'=>'Tidak ada shift terbuka.'],409); }
+        require_csrf(); $u=require_user('kasir'); $input=body();
+        $shiftId=filter_var($input['shift_id']??null,FILTER_VALIDATE_INT);
+        if(!$shiftId || $shiftId<1) json_out(['error'=>'ID sesi shift yang akan ditutup tidak valid. Muat ulang dashboard.'],422);
+        $pdo=db(); $pdo->beginTransaction();
+        $q=$pdo->prepare("SELECT id,shift_type,started_at FROM shifts WHERE id=? AND user_id=? AND status='open' FOR UPDATE");
+        $q->execute([$shiftId,$u['id']]); $shift=$q->fetch();
+        if (!$shift) { $pdo->rollBack(); json_out(['error'=>'Sesi shift yang dikonfirmasi sudah berubah atau tidak lagi terbuka. Muat ulang dashboard sebelum mencoba lagi.'],409); }
         $q=$pdo->prepare("SELECT COALESCE(SUM(amount) FILTER(WHERE payment_method='tunai'),0) AS cash,COALESCE(SUM(amount) FILTER(WHERE payment_method='qris'),0) AS qris,COALESCE(SUM(amount),0) AS received_total,COUNT(*) AS payments FROM payments WHERE shift_id=?"); $q->execute([$shift['id']]); $payments=$q->fetch();
         $expensesReady=$expenseLedgerReady();
         if($expensesReady) { $q=$pdo->prepare("SELECT COALESCE(SUM(amount),0) AS total,COALESCE(SUM(amount) FILTER(WHERE funding_source='laci_kas'),0) AS cash,COALESCE(SUM(amount) FILTER(WHERE funding_source='rekening_usaha'),0) AS bank FROM expenses WHERE shift_id=?"); $q->execute([$shift['id']]); $expenses=$q->fetch(); }

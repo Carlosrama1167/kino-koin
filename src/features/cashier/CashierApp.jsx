@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Activity, ArrowRight, Bell, Check, ChevronDown, CircleHelp, Clock3, Coins, CreditCard, LayoutDashboard, LogOut, Menu, Moon, Package, Plus, Search, Settings2, Shirt, ShoppingBag, ShoppingCart, Sparkles, Sun, Trash2, UserRound, Wallet, WashingMachine, X, ReceiptText } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowRight, Bell, Check, ChevronDown, CircleHelp, Clock3, Coins, CreditCard, LayoutDashboard, LogOut, Menu, Moon, Package, Plus, Printer, Search, Settings2, Share2, Shirt, ShoppingBag, ShoppingCart, Sparkles, Sun, Trash2, UserRound, Wallet, WashingMachine, X, ReceiptText } from 'lucide-react'
 import { categories, navGroups, services } from './data/catalog'
 import OrderManagement from './components/OrderManagement'
 import CashierDashboard from './components/CashierDashboard'
@@ -53,6 +53,7 @@ export default function App({ user, onLogout }) {
   }, [])
   const [shiftType, setShiftType] = useState('pagi')
   const [closingShift, setClosingShift] = useState(false)
+  const [shiftCloseConfirm, setShiftCloseConfirm] = useState(null)
   const [closedShift, setClosedShift] = useState(null)
   const [serverError, setServerError] = useState('')
   useEffect(() => {
@@ -163,15 +164,26 @@ export default function App({ user, onLogout }) {
     }
   }
   const openShift=async()=>{try{const r=await api('/api/shifts/open',{method:'POST',body:JSON.stringify({shift_type:shiftType})});setShift(r.shift);setClosedShift(null);setServerError('')}catch(e){setServerError(e.message)}}
+  const requestShiftClose = shiftToClose => {
+    if (!shiftToClose?.id) {
+      setServerError('Data sesi shift belum tersedia. Muat ulang dashboard sebelum menutup shift.')
+      return
+    }
+    setServerError('')
+    setShiftCloseConfirm(shiftToClose)
+  }
   const closeShift=async()=>{
-    if(!window.confirm('Tutup sesi shift sekarang? Penerimaan aktual akan diringkas, tanpa rekonsiliasi fisik.'))return
+    if(!shiftCloseConfirm || closingShift)return
     setClosingShift(true);setServerError('')
-    try{const result=await api('/api/shifts/close',{method:'POST',body:'{}'});setClosedShift(result);setShift(null)}
+    try{
+      const result=await api('/api/shifts/close',{method:'POST',body:JSON.stringify({shift_id:Number(shiftCloseConfirm.id)})})
+      setShiftCloseConfirm(null);setClosedShift(result);setShift(null)
+    }
     catch(e){setServerError(e.message)}
     finally{setClosingShift(false)}
   }
   if(shift===undefined)return <div className="auth-loading">Menghubungkan ke data kasir…</div>
-  if(!shift && closedShift)return <ShiftCloseSummary result={closedShift} onContinue={()=>setClosedShift(null)}/>
+  if(!shift && closedShift)return <ShiftCloseSummary result={closedShift} cashierName={user?.name} dark={dark} onContinue={()=>setClosedShift(null)}/>
   if(!shift)return <main className="owner-login-page"><section className="owner-login-card attendance-card"><div className="attendance-body"><div className="owner-form-kicker">KINO LAUNDRY · KASIR</div><h1>Mulai shift kerja</h1><p>Pilih shift agar transaksi tercatat dengan benar.</p>{serverError&&<div className="owner-login-notice">{serverError}</div>}<select className="shift-select" value={shiftType} onChange={e=>setShiftType(e.target.value)}><option value="pagi">Shift pagi</option><option value="siang">Shift siang</option><option value="sore">Shift sore</option><option value="malam">Shift malam</option></select><button className="owner-signin-button attendance-action" onClick={openShift}>Buka shift</button><button className="shift-logout" onClick={onLogout}>Keluar</button></div></section></main>
 
   return <div className={`app-shell ${dark ? 'dark' : ''}`}>
@@ -189,7 +201,7 @@ export default function App({ user, onLogout }) {
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Buka menu"><Menu size={20}/></button><div className="cashier-brand-copy"><b>KINO Laundry POS</b><span><i className="live-dot"/> Shift {shift?.shift_type || 'aktif'} · Kasir</span></div></div><div className="top-actions"><div className="today-chip"><span className="today-dot"/><span>{today}</span><b>{time} WIB</b></div><button className={`icon-button theme-toggle ${dark ? 'is-dark' : ''}`} onClick={() => setDark(!dark)} aria-label={dark ? 'Aktifkan mode terang' : 'Aktifkan mode gelap'}>{dark ? <Sun size={19}/> : <Moon size={18}/>}</button><button className="icon-button notification-button" aria-label="Notifikasi"><Bell size={18}/><span/></button><div className="top-profile"><div className="profile-avatar">{(user?.name || 'K').slice(0, 2).toUpperCase()}</div><span><b>{user?.name || 'Kasir'}</b><small>{shift?.shift_type ? `Shift ${shift.shift_type}` : 'Shift aktif'} · Kasir</small></span><ChevronDown size={14}/></div>{!['Transaksi Baru', 'Dashboard'].includes(active) && <button className="btn btn-primary cashier-header-transaction" onClick={() => selectNav('Transaksi Baru')}><Plus size={16}/> Transaksi Baru</button>}</div></header>
       <div className={`workspace ${['Pesanan Laundry', 'Riwayat Transaksi', 'Produk & Stok', 'Manajemen Koin', 'Laporan', 'Pengeluaran', 'Pengaturan', 'Bantuan', 'Dashboard'].includes(active) ? 'workspace-full' : ''}`}>
         <section className="content-column">
-          {active === 'Pesanan Laundry' ? <OrderManagement notify={notify}/> : active === 'Riwayat Transaksi' ? <TransactionHistory notify={notify}/> : active === 'Produk & Stok' ? <InventoryManagement notify={notify}/> : active === 'Manajemen Koin' ? <CoinManagement notify={notify}/> : active === 'Laporan' ? <ShiftReports notify={notify}/> : active === 'Pengeluaran' ? <ExpensePage notify={notify}/> : active === 'Pengaturan' ? <SettingsPage dark={dark} onTheme={setDark} notify={notify}/> : active === 'Bantuan' ? <HelpPage/> : active === 'Dashboard' ? <CashierDashboard onNavigate={selectNav} onCloseShift={closeShift} closing={closingShift} /> : <>
+          {active === 'Pesanan Laundry' ? <OrderManagement notify={notify}/> : active === 'Riwayat Transaksi' ? <TransactionHistory notify={notify}/> : active === 'Produk & Stok' ? <InventoryManagement notify={notify}/> : active === 'Manajemen Koin' ? <CoinManagement notify={notify}/> : active === 'Laporan' ? <ShiftReports notify={notify}/> : active === 'Pengeluaran' ? <ExpensePage notify={notify}/> : active === 'Pengaturan' ? <SettingsPage dark={dark} onTheme={setDark} notify={notify}/> : active === 'Bantuan' ? <HelpPage/> : active === 'Dashboard' ? <CashierDashboard onNavigate={selectNav} onCloseShift={requestShiftClose} closing={closingShift} /> : <>
           <section className="pos-card">
             <div className="pos-header"><div><div className="section-overline">LAYANAN & PRODUK</div><h3>Mulai transaksi</h3><p>Pilih layanan untuk ditambahkan ke keranjang.</p></div><div className={`pricing-badge ${nightPricing ? 'night-pricing' : ''}`}><span className="price-sun">☼</span> Harga {nightPricing ? 'malam aktif' : 'normal'} <ChevronDown size={13}/></div></div>
             <div className="category-tabs">{categories.map((c, i) => <button className={`category-tab ${category === c ? 'selected' : ''}`} onClick={() => { setCategory(c); setQuery('') }} key={c}>{i === 0 ? <WashingMachine size={15}/> : i === 1 ? <Shirt size={15}/> : i === 4 ? <ShoppingBag size={15}/> : <Sparkles size={15}/>}<span>{c}</span></button>)}</div>
@@ -238,28 +250,150 @@ export default function App({ user, onLogout }) {
       </div>
       </div>
     </section></div>}
+    {shiftCloseConfirm && <ShiftCloseConfirmation
+      shift={shiftCloseConfirm}
+      closing={closingShift}
+      error={serverError}
+      onCancel={() => setShiftCloseConfirm(null)}
+      onConfirm={closeShift}
+    />}
     {success && <div className="modal-backdrop"><section className="payment-modal transaction-success" role="dialog" aria-modal="true" aria-labelledby="transaction-success-title"><div className="success-icon"><Check size={24}/></div><h2 id="transaction-success-title">Transaksi berhasil disimpan</h2><p>Nomor transaksi <b>{success.number}</b></p><p>Status pembayaran: <b>{success.paymentStatus === 'lunas' ? 'Lunas' : 'Belum dibayar'}</b></p><div className="success-actions"><button className="btn btn-primary" onClick={() => { setSuccess(null); selectNav('Riwayat Transaksi') }}>Lihat riwayat transaksi</button><button className="btn btn-secondary" onClick={() => setSuccess(null)}>Selesai</button></div></section></div>}
   </div>
 }
 
-function ShiftCloseSummary({ result, onContinue }) {
+function ShiftCloseConfirmation({ shift, closing, error, onCancel, onConfirm }) {
+  const label = shift.shift_type ? `Shift ${shift.shift_type.charAt(0).toUpperCase()}${shift.shift_type.slice(1)}` : 'Shift aktif'
+  const startedAt = shift.started_at
+    ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(shift.started_at))
+    : 'Waktu mulai tidak tersedia'
+
+  return <div className="shift-close-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !closing && onCancel()}>
+    <section className="shift-close-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="shift-close-confirm-title" tabIndex={-1} onKeyDown={event => event.key === 'Escape' && !closing && onCancel()}>
+      <div className="shift-close-confirm-icon"><AlertTriangle size={22}/></div>
+      <div className="shift-close-confirm-kicker">KONFIRMASI TUTUP SHIFT</div>
+      <h2 id="shift-close-confirm-title">Tutup {label}?</h2>
+      <p>Pastikan sesi yang akan ditutup adalah shift yang benar.</p>
+      <div className="shift-close-confirm-details">
+        <div><span>Jenis shift</span><b>{label}</b></div>
+        <div><span>Nomor sesi</span><b>#{shift.id}</b></div>
+        <div><span>Mulai aktual</span><b>{startedAt}</b></div>
+      </div>
+      <div className="shift-close-confirm-note">Setelah dikonfirmasi, sesi ini ditutup dan ringkasan penerimaan serta pengeluaran akan ditampilkan.</div>
+      {error && <div className="checkout-error" role="alert">{error}</div>}
+      <div className="shift-close-confirm-actions">
+        <button className="btn btn-secondary" type="button" onClick={onCancel} disabled={closing} autoFocus>Batal</button>
+        <button className="btn btn-danger" type="button" onClick={onConfirm} disabled={closing}>{closing ? 'Menutup shift…' : `Ya, tutup ${label.toLowerCase()}`}</button>
+      </div>
+    </section>
+  </div>
+}
+
+function ShiftCloseSummary({ result, cashierName, dark, onContinue }) {
+  const [shareStatus, setShareStatus] = useState('')
   const { transactions, payments, coins } = result.summary
-  return <main className="owner-login-page">
-    <section className="owner-login-card attendance-card">
-      <div className="attendance-body shift-close-summary">
-        <div className="owner-form-kicker">KINO LAUNDRY · REKAP SHIFT</div>
-        <h1>Shift ditutup</h1>
-        <p>Shift {result.shift.shift_type} · {new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(result.shift.started_at))}</p>
-        <div className="shift-close-result-row"><span>Transaksi</span><b>{transactions.transactions}</b></div>
-        <div className="shift-close-result-row"><span>Pembayaran diterima</span><b>{money(payments.received_total)}</b></div>
-        <div className="shift-close-result-row"><span>Tunai · QRIS</span><b>{money(payments.cash)} · {money(payments.qris)}</b></div>
-        <div className="shift-close-result-row"><span>Pengeluaran · dari laci kas</span><b>{result.summary.expense_ledger_ready ? `${money(result.summary.expenses.total)} · ${money(result.summary.expenses.cash)}` : 'Belum tersedia'}</b></div>
-        <div className="shift-close-result-row"><span>Arus tunai setelah expense laci</span><b>{result.summary.expense_ledger_ready ? money(Number(payments.cash || 0) - Number(result.summary.expenses.cash || 0)) : 'Belum tersedia'}</b></div>
-        <div className="shift-close-result-row"><span>Tagihan belum lunas</span><b>{transactions.unpaid_count} · {money(transactions.unpaid_total)}</b></div>
-        <div className="shift-close-result-row"><span>Koin masuk · keluar</span><b>{coins.coins_in} · {coins.coins_out}</b></div>
-        <p>Rekonsiliasi fisik kas/koin dan serah terima belum tersedia. Catatan shift tidak ditutup otomatis.</p>
-        <button className="owner-signin-button attendance-action" onClick={onContinue}>Lanjutkan ke buka shift</button>
+  const shiftLabel = `Shift ${(result.shift.shift_type || '').charAt(0).toUpperCase()}${(result.shift.shift_type || '').slice(1)}`
+  const dateTime = value => value ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(value)) : '—'
+  const reportText = [
+    'KINO LAUNDRY · LAPORAN TUTUP SHIFT',
+    `Sesi: #${result.shift.id} · ${shiftLabel}`,
+    `Kasir: ${cashierName || 'Kasir'}`,
+    `Mulai: ${dateTime(result.shift.started_at)}`,
+    `Selesai: ${dateTime(result.shift.ended_at)}`,
+    '',
+    `Transaksi: ${transactions.transactions}`,
+    `Pembayaran diterima: ${money(payments.received_total)}`,
+    `Tunai: ${money(payments.cash)} · QRIS: ${money(payments.qris)}`,
+    `Pengeluaran: ${result.summary.expense_ledger_ready ? money(result.summary.expenses.total) : 'Belum tersedia'}`,
+    `Pengeluaran dari laci kas: ${result.summary.expense_ledger_ready ? money(result.summary.expenses.cash) : 'Belum tersedia'}`,
+    `Arus tunai setelah pengeluaran laci: ${result.summary.expense_ledger_ready ? money(Number(payments.cash || 0) - Number(result.summary.expenses.cash || 0)) : 'Belum tersedia'}`,
+    `Tagihan belum lunas: ${transactions.unpaid_count} transaksi · ${money(transactions.unpaid_total)}`,
+    `Koin masuk: ${coins.coins_in} · Koin keluar: ${coins.coins_out}`,
+    '',
+    'Catatan: laporan ini bukan rekonsiliasi fisik kas/koin atau laporan laba.',
+  ].join('\n')
+  const shareReport = async () => {
+    setShareStatus('')
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Laporan ${shiftLabel} · KINO Laundry`, text: reportText })
+        setShareStatus('Laporan siap dibagikan.')
+        return
+      }
+      const link = document.createElement('a')
+      link.href = `https://wa.me/?text=${encodeURIComponent(reportText)}`
+      link.target = '_blank'
+      link.rel = 'noopener noreferrer'
+      link.click()
+      setShareStatus('WhatsApp terbuka. Pilih grup tujuan lalu kirim laporan.')
+      return
+    } catch (error) {
+      if (error.name === 'AbortError') return
+      try {
+        await navigator.clipboard.writeText(reportText)
+        setShareStatus('Laporan disalin. Tempelkan ke grup WhatsApp tujuan.')
+      } catch {
+        setShareStatus('Laporan tidak dapat dibagikan. Coba cetak laporan.')
+      }
+    }
+  }
+  const printReport = () => {
+    const previousTitle = document.title
+    document.title = `Laporan ${shiftLabel} - KINO Laundry`
+    window.print()
+    window.setTimeout(() => { document.title = previousTitle }, 1000)
+  }
+  return <main className={`owner-login-page shift-close-page ${dark ? 'dark' : ''}`}>
+    <section className="owner-login-card attendance-card shift-close-card">
+      <div className="attendance-body shift-close-body">
+        <header className="shift-report-heading">
+          <div className="shift-report-brand"><span className="shift-report-mark"><WashingMachine size={20}/></span><span><b>KINO LAUNDRY</b><small>RINGKASAN OPERASIONAL</small></span></div>
+          <span className="shift-report-status"><Check size={14}/> Shift selesai</span>
+        </header>
+        <div className="shift-report-title">
+          <div><span className="shift-report-kicker">LAPORAN AKHIR SHIFT</span><h1>{shiftLabel} ditutup</h1><p>Sesi #{result.shift.id} · {cashierName || 'Kasir'}</p></div>
+          <div className="shift-report-period"><span>Mulai</span><b>{dateTime(result.shift.started_at)}</b><span>Selesai</span><b>{dateTime(result.shift.ended_at)}</b></div>
+        </div>
+
+        <section className="shift-report-highlights" aria-label="Ringkasan utama">
+          <article><span>Total transaksi</span><b>{transactions.transactions}</b><small>{transactions.unpaid_count} belum lunas</small></article>
+          <article><span>Pembayaran diterima</span><b>{money(payments.received_total)}</b><small>Nilai pembayaran tercatat</small></article>
+          <article><span>Tagihan belum lunas</span><b>{money(transactions.unpaid_total)}</b><small>{transactions.unpaid_count} transaksi</small></article>
+        </section>
+
+        <div className="shift-report-columns">
+          <section className="shift-report-section">
+            <h2>Pembayaran</h2>
+            <ReportRow label="Tunai diterima" value={money(payments.cash)}/>
+            <ReportRow label="QRIS diterima" value={money(payments.qris)}/>
+            <ReportRow label="Total diterima" value={money(payments.received_total)} strong/>
+          </section>
+          <section className="shift-report-section">
+            <h2>Pengeluaran & arus tunai</h2>
+            <ReportRow label="Total pengeluaran" value={result.summary.expense_ledger_ready ? money(result.summary.expenses.total) : 'Belum tersedia'}/>
+            <ReportRow label="Dari laci kas" value={result.summary.expense_ledger_ready ? money(result.summary.expenses.cash) : 'Belum tersedia'}/>
+            <ReportRow label="Arus tunai setelah pengeluaran laci" value={result.summary.expense_ledger_ready ? money(Number(payments.cash || 0) - Number(result.summary.expenses.cash || 0)) : 'Belum tersedia'} strong/>
+          </section>
+          <section className="shift-report-section">
+            <h2>Mutasi koin</h2>
+            <ReportRow label="Koin masuk" value={coins.coins_in}/>
+            <ReportRow label="Koin keluar" value={coins.coins_out}/>
+          </section>
+          <section className="shift-report-section shift-report-note">
+            <h2>Catatan</h2>
+            <p>Arus tunai bukan laba usaha. Rekonsiliasi fisik kas/koin dan serah terima belum tersedia pada laporan ini.</p>
+          </section>
+        </div>
+        <div className="shift-report-actions">
+          <button type="button" className="shift-report-share" onClick={shareReport}><Share2 size={17}/> Bagikan ke grup</button>
+          <button type="button" className="shift-report-print" onClick={printReport}><Printer size={17}/> Cetak / Simpan PDF</button>
+          <button type="button" className="shift-report-continue" onClick={onContinue}>Lanjutkan ke buka shift <ArrowRight size={17}/></button>
+        </div>
+        {shareStatus && <p className="shift-report-share-status" role="status">{shareStatus}</p>}
       </div>
     </section>
   </main>
+}
+
+function ReportRow({ label, value, strong = false }) {
+  return <div className={`shift-report-row ${strong ? 'strong' : ''}`}><span>{label}</span><b>{value}</b></div>
 }

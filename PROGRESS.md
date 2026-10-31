@@ -91,3 +91,18 @@
 - Setelah peninjauan dan preflight, migration `20261031_002_attendance_safeguards.sql` diterapkan hanya ke database lokal `KinoKoinLoundry` pada `127.0.0.1`; satu catatan absensi lama tetap dipertahankan dan terpetakan ke shift Sore. Produksi tidak disentuh.
 - Validasi: `npm.cmd run build` dan `php -l` untuk API, bootstrap, serta skrip cleanup berhasil. Uji constraint database rollback-only memastikan shift tak valid dan idempotency duplikat ditolak tanpa meninggalkan data. Smoke test browser dengan API mock memeriksa peringatan pulang awal, alasan, ringkasan konfirmasi/durasi/lokasi, tombol jeda, mode gelap/reduced-motion, dan viewport 390px tanpa overflow atau error JavaScript.
 - Sebelum karyawan dapat absen, Owner harus mengisi latitude/longitude outlet. Verifikasi E2E dengan kamera, GPS perangkat, sesi autentikasi nyata, serta aktivasi job cleanup terjadwal belum dilakukan. Tidak ada dependency, commit, atau push baru.
+
+## Konfirmasi Tutup Shift Kasir
+
+- Tombol “Tutup shift” di Dashboard Kasir kini membuka dialog konfirmasi yang menyebut jenis shift, ID sesi, dan waktu mulai aktual. Penutupan tidak diproses sebelum Kasir memilih “Ya, tutup …”; tombol “Batal” dan klik backdrop menutup dialog.
+- Endpoint `/api/shifts/close` menerima ID sesi yang telah dikonfirmasi dan hanya menutup sesi tersebut untuk akun Kasir yang sedang login. Jika ID tidak valid atau sesi sudah berubah/ditutup, server menolak permintaan alih-alih menutup sesi terbuka lain.
+- Setelah berhasil, sistem tetap menampilkan rekap shift yang sama seperti sebelumnya. Tidak ada perubahan pada perhitungan transaksi/pembayaran, database, atau dependency.
+- Validasi `npm.cmd run build` dan `php -l api/public/index.php` berhasil. Uji database lokal rollback-only memastikan ID shift yang dikonfirmasi ditemukan, ID berbeda ditolak, dan update hanya menutup sesi terpilih tanpa meninggalkan perubahan. Browser smoke test tidak berjalan karena koneksi browser terintegrasi timeout; endpoint belum diuji melalui sesi login nyata. Tidak ada commit atau push.
+
+## Perapihan dan Berbagi Rekap Tutup Shift
+
+- Halaman hasil tutup shift disusun ulang menjadi laporan responsif dengan identitas sesi/kasir, waktu mulai dan selesai, ringkasan transaksi, pembayaran, pengeluaran, arus tunai, tagihan belum lunas, serta mutasi koin.
+- Tombol “Cetak / Simpan PDF” membuka dialog cetak browser dengan stylesheet khusus A4 yang menyembunyikan navigasi/tombol dan mempertahankan tata letak laporan.
+- Tombol “Bagikan ke grup” membagikan teks laporan melalui native share sheet perangkat (Kasir memilih grup tujuan), atau membuka WhatsApp dengan ringkasan siap dikirim. Pesan tidak dikirim otomatis; bila share sheet gagal, laporan disalin ke clipboard jika diizinkan.
+- Tema terang/gelap serta tampilan layar kecil didukung. Data tetap dari rekap shift server yang sudah ada; tidak ada perubahan API atau perhitungan bisnis.
+- Validasi `npm.cmd run build` dan `git diff --check` berhasil. Browser preview untuk visual/print tidak dapat dilakukan karena koneksi browser terintegrasi timeout. Tidak ada dependency, commit, atau push.
