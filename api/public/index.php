@@ -40,6 +40,54 @@ $expenseLedgerReady = static function (): bool {
     $value=db()->query("SELECT to_regclass('public.expenses') IS NOT NULL")->fetchColumn();
     return $value===true || $value==='t' || $value===1 || $value==='1';
 };
+$attendanceValidateLocation = static function (PDO $pdo, int $outletId, array $input): array {
+    $latitude=$input['latitude']??null;
+    $longitude=$input['longitude']??null;
+    $accuracy=$input['accuracy']??null;
+    $timestamp=$input['location_timestamp']??null;
+    if (!is_numeric($latitude) || !is_numeric($longitude) || !is_numeric($accuracy)
+        || !is_finite((float)$latitude) || !is_finite((float)$longitude) || !is_finite((float)$accuracy)
+        || (float)$latitude < -90 || (float)$latitude > 90 || (float)$longitude < -180 || (float)$longitude > 180
+        || (float)$accuracy <= 0 || (float)$accuracy > 100 || !is_numeric($timestamp)
+        || !is_finite((float)$timestamp) || abs((int)floor(microtime(true)*1000)-(int)$timestamp)>120000) {
+        json_out(['error'=>'Lokasi GPS tidak valid, kedaluwarsa, atau akurasinya lebih dari 100 meter. Aktifkan lokasi presisi lalu coba lagi.'],422);
+    }
+    $q=$pdo->prepare('SELECT attendance_latitude,attendance_longitude FROM outlets WHERE id=? AND is_active=TRUE');
+    $q->execute([$outletId]); $outlet=$q->fetch();
+    if (!$outlet || $outlet['attendance_latitude']===null || $outlet['attendance_longitude']===null) {
+        json_out(['error'=>'Lokasi outlet belum diatur Owner. Hubungi Owner sebelum melakukan absensi.'],409);
+    }
+    $lat1=deg2rad((float)$latitude); $lat2=deg2rad((float)$outlet['attendance_latitude']);
+    $latDelta=$lat2-$lat1; $lonDelta=deg2rad((float)$outlet['attendance_longitude']-(float)$longitude);
+    $a=sin($latDelta/2)**2+cos($lat1)*cos($lat2)*sin($lonDelta/2)**2;
+    $distance=6371000*2*atan2(sqrt($a),sqrt(max(0,1-$a)));
+    if ($distance>100) json_out(['error'=>'Anda berada di luar area absensi outlet (radius 100 meter).'],403);
+    return ['latitude'=>(float)$latitude,'longitude'=>(float)$longitude,'accuracy'=>(float)$accuracy,'timestamp'=>(int)$timestamp,'distance'=>(int)round($distance)];
+};
+$attendanceCurrentSchedule = static function (PDO $pdo): ?array {
+    $q=$pdo->query("SELECT shift_type,start_time::text AS start_time,end_time::text AS end_time,timezone FROM shift_schedules WHERE is_active AND ((start_time<end_time AND (NOW() AT TIME ZONE timezone)::time>=start_time AND (NOW() AT TIME ZONE timezone)::time<end_time) OR (start_time>=end_time AND ((NOW() AT TIME ZONE timezone)::time>=start_time OR (NOW() AT TIME ZONE timezone)::time<end_time))) ORDER BY start_time LIMIT 1");
+    return $q->fetch() ?: null;
+};
+$attendanceShiftEnd = static function (PDO $pdo, string $shiftType, string $workDate): ?DateTimeImmutable {
+    $q=$pdo->prepare('SELECT start_time::text AS start_time,end_time::text AS end_time,timezone FROM shift_schedules WHERE shift_type=? AND is_active');
+    $q->execute([$shiftType]); $schedule=$q->fetch();
+    if (!$schedule) return null;
+    $timezone=new DateTimeZone($schedule['timezone']);
+    $start=substr($schedule['start_time'],0,8);
+    $end=substr($schedule['end_time'],0,8);
+    $endAt=new DateTimeImmutable($workDate.' '.$end,$timezone);
+    if ($end<=$start) $endAt=$endAt->modify('+1 day');
+    return $endAt;
+};
+$attendancePhotoDirectory = static fn(): string => dirname(__DIR__).'/private/attendance';
+$attendanceSafeguardsReady = static function (PDO $pdo): bool {
+    $events=$pdo->query("SELECT to_regclass('public.attendance_events') IS NOT NULL")->fetchColumn();
+    $shift=$pdo->query("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='employee_attendance' AND column_name='shift_type')")->fetchColumn();
+    $outlet=$pdo->query("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='outlets' AND column_name='attendance_checkout_grace_minutes')")->fetchColumn();
+    return ($events===true||$events==='t'||$events===1||$events==='1')
+        && ($shift===true||$shift==='t'||$shift===1||$shift==='1')
+        && ($outlet===true||$outlet==='t'||$outlet===1||$outlet==='1');
+};
 try {
     if ($method === 'GET' && $path === '/api/auth/csrf') {
         $_SESSION['csrf'] ??= bin2hex(random_bytes(32)); json_out(['csrf'=>$_SESSION['csrf']]);
@@ -172,23 +220,331 @@ try {
         $pdo->commit(); json_out(['ok'=>true,'stock'=>$next,'movement'=>$movement],201);
     }
     if ($method === 'GET' && $path === '/api/attendance/me') {
-        $u=require_user(); $q=db()->prepare("SELECT id,work_date,check_in_at,check_out_at,status,notes FROM employee_attendance WHERE user_id=? AND work_date=(NOW() AT TIME ZONE 'Asia/Jakarta')::date"); $q->execute([$u['id']]); json_out(['attendance'=>$q->fetch() ?: null]);
+        $u=require_user('karyawan');
+        $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan. Hubungi administrator.'],503);
+        $schedule=$attendanceCurrentSchedule($pdo);
+        $q=$pdo->prepare("SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes,
+            CASE WHEN check_out_at IS NOT NULL AND NOW()<=check_out_at+INTERVAL '2 minutes' THEN check_out_at+INTERVAL '2 minutes' ELSE NULL END AS undo_until
+            FROM employee_attendance WHERE user_id=? AND check_out_at IS NULL ORDER BY check_in_at DESC,id DESC LIMIT 1");
+        $q->execute([(int)$u['id']]); $openAttendance=$q->fetch() ?: null;
+        $currentAttendance=null;
+        if($schedule) {
+            $q=$pdo->prepare("SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes,
+                CASE WHEN check_out_at IS NOT NULL AND NOW()<=check_out_at+INTERVAL '2 minutes' THEN check_out_at+INTERVAL '2 minutes' ELSE NULL END AS undo_until
+                FROM employee_attendance WHERE user_id=? AND work_date=(NOW() AT TIME ZONE 'Asia/Jakarta')::date AND shift_type=? LIMIT 1");
+            $q->execute([(int)$u['id'],$schedule['shift_type']]); $currentAttendance=$q->fetch() ?: null;
+        }
+        $q=$pdo->prepare("SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes,
+            CASE WHEN check_out_at IS NOT NULL AND NOW()<=check_out_at+INTERVAL '2 minutes' THEN check_out_at+INTERVAL '2 minutes' ELSE NULL END AS undo_until
+            FROM employee_attendance WHERE user_id=? AND work_date>=(NOW() AT TIME ZONE 'Asia/Jakarta')::date-1
+            ORDER BY check_in_at DESC,id DESC LIMIT 5");
+        $q->execute([(int)$u['id']]); $recent=$q->fetchAll();
+        $withShiftEnd=static function (?array $row) use ($attendanceShiftEnd,$pdo): ?array {
+            if($row) {
+                $shiftEnd=$attendanceShiftEnd($pdo,(string)$row['shift_type'],(string)$row['work_date']);
+                $row['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+            }
+            return $row;
+        };
+        $openAttendance=$withShiftEnd($openAttendance);
+        $currentAttendance=$withShiftEnd($currentAttendance);
+        $attendance=$openAttendance ?: ($currentAttendance ?: ($recent[0]??null));
+        if($attendance) {
+            $shiftEnd=$attendanceShiftEnd($pdo,(string)$attendance['shift_type'],(string)$attendance['work_date']);
+            $attendance['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+        }
+        $q=$pdo->prepare('SELECT attendance_checkout_grace_minutes FROM outlets WHERE id=?');
+        $q->execute([(int)$u['outlet_id']]); $grace=$q->fetchColumn();
+        json_out([
+            'attendance'=>$attendance,
+            'open_attendance'=>$openAttendance,
+            'current_shift_attendance'=>$currentAttendance,
+            'current_shift'=>$schedule,
+            'can_check_in'=>(bool)$schedule && !$openAttendance && !$currentAttendance,
+            'recent'=>$recent,
+            'checkout_grace_minutes'=>$grace===false?30:(int)$grace,
+        ]);
     }
     if ($method === 'POST' && $path === '/api/attendance/check-in') {
-        require_csrf(); $u=require_user(); $q=db()->prepare("INSERT INTO employee_attendance(user_id,outlet_id,work_date,check_in_at,status) VALUES(?,?,(NOW() AT TIME ZONE 'Asia/Jakarta')::date,NOW(),'hadir') ON CONFLICT(user_id,work_date) DO NOTHING RETURNING id,work_date,check_in_at,check_out_at,status"); $q->execute([$u['id'],$u['outlet_id']]); $r=$q->fetch(); if (!$r) json_out(['error'=>'Absensi hari ini sudah tercatat.'],409); json_out(['attendance'=>$r],201);
+        require_csrf(); $u=require_user('karyawan'); $input=body();
+        $key=trim((string)($input['idempotency_key']??''));
+        if(!preg_match('/^[A-Za-z0-9._:-]{8,100}$/',$key)) json_out(['error'=>'Kunci absensi tidak valid. Muat ulang halaman lalu coba lagi.'],422);
+        $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503);
+        $q=$pdo->prepare("SELECT a.id,a.work_date,a.shift_type,a.check_in_at,a.check_out_at,a.checkout_reason,a.status,a.notes FROM attendance_events e JOIN employee_attendance a ON a.id=e.attendance_id WHERE e.actor_user_id=? AND e.idempotency_key=? AND e.event_type='check_in' LIMIT 1");
+        $q->execute([(int)$u['id'],$key]); $duplicate=$q->fetch();
+        if($duplicate) {
+            $shiftEnd=$attendanceShiftEnd($pdo,(string)$duplicate['shift_type'],(string)$duplicate['work_date']);
+            $duplicate['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+            json_out(['attendance'=>$duplicate,'duplicate'=>true]);
+        }
+        if(empty($u['outlet_id'])) json_out(['error'=>'Akun karyawan belum ditautkan ke outlet. Hubungi Owner.'],409);
+        $location=$attendanceValidateLocation($pdo,(int)$u['outlet_id'],$input);
+        $schedule=$attendanceCurrentSchedule($pdo);
+        if(!$schedule) json_out(['error'=>'Tidak ada jadwal shift yang sedang aktif. Absensi masuk hanya dapat dilakukan pada jam shift yang ditetapkan.'],409);
+        $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare('SELECT id FROM users WHERE id=? FOR UPDATE'); $q->execute([(int)$u['id']]); $q->fetch();
+            $open=$pdo->prepare('SELECT shift_type FROM employee_attendance WHERE user_id=? AND check_out_at IS NULL LIMIT 1');
+            $open->execute([(int)$u['id']]); $existingOpen=$open->fetchColumn();
+            if($existingOpen!==false) { $pdo->rollBack(); json_out(['error'=>'Selesaikan absensi shift '.ucfirst((string)$existingOpen).' terlebih dahulu sebelum absen masuk shift berikutnya.'],409); }
+            $q=$pdo->query("SELECT (NOW() AT TIME ZONE 'Asia/Jakarta')::date AS work_date");
+            $workDate=(string)$q->fetchColumn();
+            $q=$pdo->prepare("INSERT INTO employee_attendance(outlet_id,user_id,work_date,shift_type,check_in_at,status) VALUES(?,?,?::date,?,NOW(),'hadir') ON CONFLICT (user_id,work_date,shift_type) WHERE shift_type IS NOT NULL DO NOTHING RETURNING id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes");
+            $q->execute([(int)$u['outlet_id'],(int)$u['id'],$workDate,$schedule['shift_type']]); $attendance=$q->fetch();
+            if(!$attendance) {
+                $q=$pdo->prepare('SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes FROM employee_attendance WHERE user_id=? AND work_date=?::date AND shift_type=?');
+                $q->execute([(int)$u['id'],$workDate,$schedule['shift_type']]); $existing=$q->fetch();
+                if($existing) {
+                    $shiftEnd=$attendanceShiftEnd($pdo,(string)$existing['shift_type'],(string)$existing['work_date']);
+                    $existing['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+                }
+                $pdo->commit();
+                json_out(['attendance'=>$existing,'duplicate'=>true]);
+            }
+            $q=$pdo->prepare("INSERT INTO attendance_events(attendance_id,actor_user_id,event_type,attendance_time_after,latitude,longitude,accuracy_meters,idempotency_key) VALUES(?,?,'check_in',?,?,?, ?,?)");
+            $q->execute([(int)$attendance['id'],(int)$u['id'],$attendance['check_in_at'],$location['latitude'],$location['longitude'],$location['accuracy'],$key]);
+            $shiftEnd=$attendanceShiftEnd($pdo,(string)$attendance['shift_type'],(string)$attendance['work_date']);
+            $attendance['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+            $pdo->commit();
+            json_out(['attendance'=>$attendance,'duplicate'=>false],201);
+        } catch(Throwable $error) {
+            if($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
     }
     if ($method === 'POST' && $path === '/api/attendance/check-out') {
-        require_csrf(); $u=require_user(); $q=db()->prepare("UPDATE employee_attendance SET check_out_at=NOW() WHERE user_id=? AND work_date=(NOW() AT TIME ZONE 'Asia/Jakarta')::date AND check_out_at IS NULL RETURNING id,work_date,check_in_at,check_out_at,status"); $q->execute([$u['id']]); $r=$q->fetch(); if (!$r) json_out(['error'=>'Tidak ada absensi aktif untuk ditutup.'],409); json_out(['attendance'=>$r]);
+        require_csrf(); $u=require_user('karyawan');
+        $input=$_POST?:body();
+        $key=trim((string)($input['idempotency_key']??''));
+        $reason=trim((string)($input['reason']??''));
+        if(!preg_match('/^[A-Za-z0-9._:-]{8,100}$/',$key)) json_out(['error'=>'Kunci absensi pulang tidak valid.'],422);
+        if($reason!=='' && !in_array($reason,['Izin','Sakit','Diizinkan owner','Lainnya'],true)) json_out(['error'=>'Alasan pulang lebih awal tidak valid.'],422);
+        $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503);
+        $q=$pdo->prepare("SELECT a.id,a.work_date,a.shift_type,a.check_in_at,a.check_out_at,a.checkout_reason,a.status,a.notes FROM attendance_events e JOIN employee_attendance a ON a.id=e.attendance_id WHERE e.actor_user_id=? AND e.idempotency_key=? AND e.event_type='check_out' LIMIT 1");
+        $q->execute([(int)$u['id'],$key]); $duplicate=$q->fetch();
+        if($duplicate) json_out([
+            'attendance'=>$duplicate,
+            'undo_until'=>$duplicate['check_out_at'] ? (new DateTimeImmutable((string)$duplicate['check_out_at']))->modify('+2 minutes')->format(DateTimeInterface::ATOM) : null,
+            'duplicate'=>true,
+        ]);
+        if(empty($u['outlet_id'])) json_out(['error'=>'Akun karyawan belum ditautkan ke outlet. Hubungi Owner.'],409);
+        $location=$attendanceValidateLocation($pdo,(int)$u['outlet_id'],$input);
+        $file=$_FILES['photo']??null;
+        if(!$file || !isset($file['error']) || $file['error']!==UPLOAD_ERR_OK) json_out(['error'=>'Selfie pulang wajib diambil setelah konfirmasi.'],422);
+        if((int)$file['size']<=0 || (int)$file['size']>5242880 || !is_uploaded_file((string)$file['tmp_name'])) json_out(['error'=>'Selfie harus berukuran maksimal 5 MB.'],422);
+        $finfo=finfo_open(FILEINFO_MIME_TYPE);
+        if($finfo===false) json_out(['error'=>'Validasi foto tidak tersedia pada server.'],500);
+        $mime=finfo_file($finfo,(string)$file['tmp_name']); finfo_close($finfo);
+        $extensions=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'];
+        if(!is_string($mime) || !isset($extensions[$mime]) || @getimagesize((string)$file['tmp_name'])===false) json_out(['error'=>'Selfie harus berupa gambar JPG, PNG, atau WebP yang valid.'],422);
+        $graceQuery=$pdo->prepare('SELECT attendance_checkout_grace_minutes FROM outlets WHERE id=? AND is_active=TRUE');
+        $graceQuery->execute([(int)$u['outlet_id']]); $grace=(int)$graceQuery->fetchColumn();
+        $pdo->beginTransaction();
+        $storedPath=null;
+        try {
+            $q=$pdo->prepare("SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes FROM employee_attendance WHERE user_id=? AND check_out_at IS NULL ORDER BY check_in_at DESC,id DESC LIMIT 1 FOR UPDATE");
+            $q->execute([(int)$u['id']]); $attendance=$q->fetch();
+            if(!$attendance) {
+                $q=$pdo->prepare("SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes FROM employee_attendance WHERE user_id=? AND check_out_at IS NOT NULL AND work_date>=((NOW() AT TIME ZONE 'Asia/Jakarta')::date-1) ORDER BY check_out_at DESC,id DESC LIMIT 1");
+                $q->execute([(int)$u['id']]); $already=$q->fetch();
+                $pdo->commit();
+                if($already) json_out([
+                    'attendance'=>$already,
+                    'undo_until'=>(new DateTimeImmutable((string)$already['check_out_at']))->modify('+2 minutes')->format(DateTimeInterface::ATOM),
+                    'duplicate'=>true,
+                ]);
+                json_out(['error'=>'Tidak ada absensi masuk aktif untuk ditutup.'],409);
+            }
+            $checkInAt=new DateTimeImmutable((string)$attendance['check_in_at']);
+            $now=new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta'));
+            $availableAt=$checkInAt->modify('+'.$grace.' minutes');
+            if($now<$availableAt) {
+                $pdo->rollBack();
+                json_out(['error'=>'Belum melewati jeda minimum sebelum absen pulang.','available_at'=>$availableAt->format(DateTimeInterface::ATOM)],409);
+            }
+            $shiftEnd=$attendanceShiftEnd($pdo,(string)$attendance['shift_type'],(string)$attendance['work_date']);
+            $early=$shiftEnd!==null && $now<$shiftEnd;
+            if($early && $reason==='') {
+                $pdo->rollBack();
+                json_out(['error'=>'Alasan wajib dipilih untuk pulang sebelum jadwal shift berakhir.','shift_end_at'=>$shiftEnd->format(DateTimeInterface::ATOM)],422);
+            }
+            if(!$early && $reason!=='') {
+                $pdo->rollBack();
+                json_out(['error'=>'Alasan pulang lebih awal hanya berlaku sebelum jadwal shift berakhir.'],422);
+            }
+            $directory=$attendancePhotoDirectory();
+            if(is_link(dirname(__DIR__).'/private') || is_link($directory)) { $pdo->rollBack(); json_out(['error'=>'Lokasi penyimpanan selfie tidak aman.'],500); }
+            if(!is_dir($directory) && !mkdir($directory,0700,true) && !is_dir($directory)) { $pdo->rollBack(); json_out(['error'=>'Direktori selfie tidak dapat disiapkan.'],500); }
+            $photoKey=bin2hex(random_bytes(24)).'.'.$extensions[$mime];
+            $storedPath=$directory.'/'.$photoKey;
+            if(!move_uploaded_file((string)$file['tmp_name'],$storedPath)) { $pdo->rollBack(); json_out(['error'=>'Selfie gagal disimpan.'],500); }
+            $q=$pdo->prepare("UPDATE employee_attendance SET check_out_at=NOW(),checkout_reason=? WHERE id=? RETURNING id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes");
+            $q->execute([$reason?:null,(int)$attendance['id']]); $updated=$q->fetch();
+            $q=$pdo->prepare("INSERT INTO attendance_events(attendance_id,actor_user_id,event_type,reason,attendance_time_before,attendance_time_after,latitude,longitude,accuracy_meters,photo_storage_key,photo_mime,photo_size,photo_expires_at,idempotency_key) VALUES(?,?,'check_out',?,NULL,?,?,?, ?,?,?,?,NOW()+INTERVAL '30 days',?)");
+            $q->execute([(int)$attendance['id'],(int)$u['id'],$reason?:null,$updated['check_out_at'],$location['latitude'],$location['longitude'],$location['accuracy'],$photoKey,$mime,(int)$file['size'],$key]);
+            $pdo->commit();
+            json_out(['attendance'=>$updated,'undo_until'=>(new DateTimeImmutable((string)$updated['check_out_at']))->modify('+2 minutes')->format(DateTimeInterface::ATOM),'duplicate'=>false],201);
+        } catch(Throwable $error) {
+            if($pdo->inTransaction()) $pdo->rollBack();
+            if($storedPath && is_file($storedPath) && !unlink($storedPath)) error_log('KINO POS: gagal membersihkan selfie absensi '.$storedPath);
+            throw $error;
+        }
+    }
+    if ($method === 'POST' && $path === '/api/attendance/cancel-check-out') {
+        require_csrf(); $u=require_user('karyawan'); $input=body();
+        $key=trim((string)($input['idempotency_key']??''));
+        if(!preg_match('/^[A-Za-z0-9._:-]{8,100}$/',$key)) json_out(['error'=>'Kunci pembatalan tidak valid.'],422);
+        $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503);
+        $q=$pdo->prepare("SELECT a.id,a.work_date,a.shift_type,a.check_in_at,a.check_out_at,a.checkout_reason,a.status,a.notes FROM attendance_events e JOIN employee_attendance a ON a.id=e.attendance_id WHERE e.actor_user_id=? AND e.idempotency_key=? AND e.event_type='checkout_cancelled' LIMIT 1");
+        $q->execute([(int)$u['id'],$key]); $duplicate=$q->fetch();
+        if($duplicate) {
+            $shiftEnd=$attendanceShiftEnd($pdo,(string)$duplicate['shift_type'],(string)$duplicate['work_date']);
+            $duplicate['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+            json_out(['attendance'=>$duplicate,'duplicate'=>true]);
+        }
+        $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare("SELECT id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status,notes FROM employee_attendance WHERE user_id=? AND check_out_at IS NOT NULL AND check_out_at>=NOW()-INTERVAL '2 minutes' ORDER BY check_out_at DESC,id DESC LIMIT 1 FOR UPDATE");
+            $q->execute([(int)$u['id']]); $attendance=$q->fetch();
+            if(!$attendance) { $pdo->rollBack(); json_out(['error'=>'Batas 2 menit untuk membatalkan absen pulang sudah lewat.'],409); }
+            $q=$pdo->prepare("UPDATE employee_attendance SET check_out_at=NULL,checkout_reason=NULL WHERE id=? AND check_out_at>=NOW()-INTERVAL '2 minutes' RETURNING id");
+            $q->execute([(int)$attendance['id']]);
+            if(!$q->fetch()) { $pdo->rollBack(); json_out(['error'=>'Batas 2 menit untuk membatalkan absen pulang sudah lewat.'],409); }
+            $q=$pdo->prepare("INSERT INTO attendance_events(attendance_id,actor_user_id,event_type,reason,attendance_time_before,attendance_time_after,idempotency_key) VALUES(?,?,'checkout_cancelled','Salah tekan',?,NULL,?)");
+            $q->execute([(int)$attendance['id'],(int)$u['id'],$attendance['check_out_at'],$key]);
+            $shiftEnd=$attendanceShiftEnd($pdo,(string)$attendance['shift_type'],(string)$attendance['work_date']);
+            $attendance['shift_end_at']=$shiftEnd?->format(DateTimeInterface::ATOM);
+            $pdo->commit();
+            $attendance['check_out_at']=null; $attendance['checkout_reason']=null;
+            json_out(['attendance'=>$attendance,'cancelled'=>true]);
+        } catch(Throwable $error) {
+            if($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+    }
+    if ($method === 'GET' && preg_match('#^/api/attendance/([0-9]+)/history$#',$path,$matches)) {
+        $u=require_user();
+        $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503);
+        $attendanceId=(int)$matches[1];
+        $q=$pdo->prepare('SELECT outlet_id,user_id FROM employee_attendance WHERE id=?'); $q->execute([$attendanceId]); $owner=$q->fetch();
+        if(!$owner) json_out(['error'=>'Catatan absensi tidak ditemukan.'],404);
+        if($u['role']!=='owner' && (int)$u['id']!==(int)$owner['user_id']) json_out(['error'=>'Anda tidak memiliki akses ke riwayat absensi ini.'],403);
+        if($u['role']==='owner' && (int)$owner['outlet_id']!==$ownerOutletId()) json_out(['error'=>'Anda tidak memiliki akses ke riwayat absensi ini.'],403);
+        $q=$pdo->prepare("SELECT e.id,e.event_type,e.reason,e.occurred_at,e.attendance_time_before,e.attendance_time_after,e.latitude,e.longitude,e.accuracy_meters,
+            CASE WHEN e.photo_storage_key IS NOT NULL AND e.photo_expires_at>NOW() THEN TRUE ELSE FALSE END AS photo_available,u.name AS actor
+            FROM attendance_events e JOIN users u ON u.id=e.actor_user_id WHERE e.attendance_id=? ORDER BY e.occurred_at,e.id");
+        $q->execute([$attendanceId]); json_out(['items'=>$q->fetchAll()]);
+    }
+    if ($method==='GET' && preg_match('#^/api/attendance/events/([0-9]+)/photo$#',$path,$matches)) {
+        $u=require_user(); $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503);
+        $q=$pdo->prepare("SELECT e.photo_storage_key,e.photo_mime,a.user_id,a.outlet_id FROM attendance_events e JOIN employee_attendance a ON a.id=e.attendance_id WHERE e.id=? AND e.photo_storage_key IS NOT NULL AND e.photo_expires_at>NOW()");
+        $q->execute([(int)$matches[1]]); $photo=$q->fetch();
+        if(!$photo) json_out(['error'=>'Selfie tidak ditemukan atau masa simpannya telah berakhir.'],404);
+        if($u['role']!=='owner' && ((int)$u['id']!==(int)$photo['user_id'] || $u['role']!=='karyawan')) json_out(['error'=>'Anda tidak memiliki akses ke selfie ini.'],403);
+        if($u['role']==='owner' && (int)$photo['outlet_id']!==$ownerOutletId()) json_out(['error'=>'Anda tidak memiliki akses ke selfie ini.'],403);
+        if(!preg_match('/^[a-f0-9]{48}\.(jpg|png|webp)$/',(string)$photo['photo_storage_key'])) json_out(['error'=>'Kunci penyimpanan selfie tidak valid.'],500);
+        $photoPath=$attendancePhotoDirectory().'/'.$photo['photo_storage_key'];
+        if(!is_file($photoPath) || is_link($photoPath)) json_out(['error'=>'Berkas selfie tidak tersedia.'],404);
+        header('Content-Type: '.$photo['photo_mime']); header('Content-Length: '.(string)filesize($photoPath));
+        header('X-Content-Type-Options: nosniff'); header('Cache-Control: private, no-store, max-age=0');
+        readfile($photoPath); exit;
+    }
+    if ($method==='PATCH' && preg_match('#^/api/owner/attendance/([0-9]+)$#',$path,$matches)) {
+        require_csrf(); $u=require_user('owner'); $input=body(); $reason=trim((string)($input['reason']??'')); $corrected=$input['check_out_at']??'';
+        if($reason==='' || strlen($reason)>500 || !is_string($corrected)) json_out(['error'=>'Waktu koreksi dan alasan wajib diisi.'],422);
+        try { $correctedAt=new DateTimeImmutable($corrected); } catch(Throwable) { json_out(['error'=>'Format waktu koreksi tidak valid.'],422); }
+        $pdo=db(); if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503); $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare("SELECT id,outlet_id,user_id,check_in_at,check_out_at FROM employee_attendance WHERE id=? FOR UPDATE");
+            $q->execute([(int)$matches[1]]); $attendance=$q->fetch();
+            if(!$attendance || (int)$attendance['outlet_id']!==$ownerOutletId()) { $pdo->rollBack(); json_out(['error'=>'Catatan absensi tidak ditemukan pada outlet ini.'],404); }
+            if(!$attendance['check_out_at'] || new DateTimeImmutable((string)$attendance['check_out_at'])>=new DateTimeImmutable('now')->modify('-2 minutes')) {
+                $pdo->rollBack(); json_out(['error'=>'Koreksi Owner hanya tersedia setelah jendela pembatalan 2 menit berakhir.'],409);
+            }
+            if($correctedAt<new DateTimeImmutable((string)$attendance['check_in_at']) || $correctedAt>new DateTimeImmutable('now')) {
+                $pdo->rollBack(); json_out(['error'=>'Waktu pulang harus berada setelah waktu masuk dan tidak boleh di masa depan.'],422);
+            }
+            $q=$pdo->prepare('UPDATE employee_attendance SET check_out_at=? WHERE id=? RETURNING id,work_date,shift_type,check_in_at,check_out_at,checkout_reason,status');
+            $q->execute([$correctedAt->format(DateTimeInterface::ATOM),(int)$attendance['id']]); $updated=$q->fetch();
+            $q=$pdo->prepare("INSERT INTO attendance_events(attendance_id,actor_user_id,event_type,reason,attendance_time_before,attendance_time_after) VALUES(?,?,'owner_correction',?,?,?)");
+            $q->execute([(int)$attendance['id'],(int)$u['id'],$reason,$attendance['check_out_at'],$updated['check_out_at']]);
+            $pdo->commit(); json_out(['attendance'=>$updated]);
+        } catch(Throwable $error) {
+            if($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+    }
+    if ($method === 'GET' && $path === '/api/owner/employees') {
+        require_user('owner');
+        $outletId=$ownerOutletId();
+        $q=db()->prepare("SELECT id,name,username,email,is_active,created_at FROM users WHERE outlet_id=? AND role='karyawan' ORDER BY name,id");
+        $q->execute([$outletId]);
+        json_out(['items'=>$q->fetchAll()]);
+    }
+    if ($method === 'POST' && $path === '/api/owner/employees') {
+        require_csrf();
+        require_user('owner');
+        $input=body();
+        $name=trim((string)($input['name']??''));
+        $username=trim((string)($input['username']??''));
+        $email=strtolower(trim((string)($input['email']??'')));
+        $password=(string)($input['password']??'');
+        $nameLength=preg_match_all('/./us',$name);
+        $passwordLength=preg_match_all('/./us',$password);
+        if ($name==='' || $nameLength===false || $nameLength>100 || !preg_match('/^[A-Za-z0-9._-]{3,50}$/',$username)) {
+            json_out(['error'=>'Nama wajib diisi (maksimal 100 karakter) dan nama pengguna harus 3–50 karakter: huruf, angka, titik, garis bawah, atau tanda hubung.'],422);
+        }
+        if ($email!=='' && (strlen($email)>100 || !filter_var($email,FILTER_VALIDATE_EMAIL))) {
+            json_out(['error'=>'Format email tidak valid.'],422);
+        }
+        if ($passwordLength===false || $passwordLength<12 || $passwordLength>128 || str_contains($password,"\0")) {
+            json_out(['error'=>'Kata sandi awal harus terdiri dari 12–128 karakter.'],422);
+        }
+        $outletId=$ownerOutletId();
+        $identities=[$username];
+        if ($email!=='') $identities[]=$email;
+        $identitySlots=implode(',',array_fill(0,count($identities),'LOWER(?)'));
+        $q=db()->prepare("SELECT 1 FROM users WHERE LOWER(username) IN ({$identitySlots}) OR LOWER(email) IN ({$identitySlots}) LIMIT 1");
+        $q->execute([...$identities,...$identities]);
+        if ($q->fetchColumn()) json_out(['error'=>'Nama pengguna atau email sudah digunakan.'],409);
+        try {
+            $q=db()->prepare("INSERT INTO users(outlet_id,name,username,email,password_hash,role,is_active) VALUES(?,?,?,?,?,'karyawan',TRUE) RETURNING id,name,username,email,role,is_active,created_at");
+            $q->execute([$outletId,$name,$username,$email?:null,password_hash($password,PASSWORD_DEFAULT)]);
+            json_out(['user'=>$q->fetch()],201);
+        } catch (PDOException $error) {
+            if ($error->getCode()==='23505') json_out(['error'=>'Nama pengguna atau email sudah digunakan.'],409);
+            throw $error;
+        }
     }
     if ($method === 'GET' && $path === '/api/attendance') {
         require_user('owner');
+        $pdo=db();
+        if(!$attendanceSafeguardsReady($pdo)) json_out(['error'=>'Migration pengaman absensi belum diterapkan.'],503);
         $outletId=$ownerOutletId();
         $date=$_GET['date']??(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('Y-m-d');
         $search=trim((string)($_GET['search']??'')); $shift=$_GET['shift']??'';
-        $q=db()->prepare("SELECT u.id AS user_id,a.id AS attendance_id,a.work_date,a.check_in_at,a.check_out_at,a.status,u.name,u.role,s.shift_type FROM users u LEFT JOIN employee_attendance a ON a.user_id=u.id AND a.work_date=?::date LEFT JOIN shifts s ON s.id=a.shift_id WHERE u.outlet_id=? AND u.is_active=TRUE AND u.role IN ('kasir','karyawan') AND LOWER(u.name) LIKE LOWER(?) AND (?::text IS NULL OR s.shift_type=?) ORDER BY u.name LIMIT 300");
+        if($shift!==''&&!in_array($shift,['pagi','siang','sore','malam'],true))json_out(['error'=>'Jenis shift tidak valid.'],422);
+        $q=$pdo->prepare("SELECT u.id AS user_id,a.id AS attendance_id,a.work_date,a.check_in_at,a.check_out_at,a.checkout_reason,a.status,u.name,u.role,COALESCE(a.shift_type,s.shift_type) AS shift_type,
+            (SELECT COUNT(*) FROM attendance_events ev WHERE ev.attendance_id=a.id AND ev.event_type='checkout_cancelled') AS cancellation_count,
+            (SELECT MAX(ev.occurred_at) FROM attendance_events ev WHERE ev.attendance_id=a.id) AS last_event_at
+            FROM users u LEFT JOIN employee_attendance a ON a.user_id=u.id AND a.work_date=?::date LEFT JOIN shifts s ON s.id=a.shift_id
+            WHERE u.outlet_id=? AND u.is_active=TRUE AND u.role IN ('kasir','karyawan') AND LOWER(u.name) LIKE LOWER(?) AND (?::text IS NULL OR COALESCE(a.shift_type,s.shift_type)=?)
+            ORDER BY u.name,a.check_in_at DESC NULLS LAST LIMIT 300");
         $q->execute([$date,$outletId,'%'.$search.'%',$shift?:null,$shift?:null]); $items=$q->fetchAll();
-        $present=count(array_filter($items,static fn(array $row):bool=>$row['status']==='hadir'));
-        json_out(['items'=>$items,'summary'=>['employees'=>count($items),'present'=>$present,'not_checked_in'=>count(array_filter($items,static fn(array $row):bool=>$row['attendance_id']===null)),'leave'=>count(array_filter($items,static fn(array $row):bool=>in_array($row['status'],['izin','sakit','alpha'],true)))]]);
+        $employeeRows=[]; foreach($items as $row){$employeeRows[(int)$row['user_id']][]=$row;}
+        $present=0;$notCheckedIn=0;$leave=0;
+        foreach($employeeRows as $records) {
+            if(count(array_filter($records,static fn(array $row):bool=>$row['status']==='hadir'))>0)$present++;
+            if(count(array_filter($records,static fn(array $row):bool=>$row['attendance_id']===null))>0)$notCheckedIn++;
+            if(count(array_filter($records,static fn(array $row):bool=>in_array($row['status'],['izin','sakit','alpha'],true)))>0)$leave++;
+        }
+        json_out(['items'=>$items,'summary'=>['employees'=>count($employeeRows),'present'=>$present,'not_checked_in'=>$notCheckedIn,'leave'=>$leave]]);
     }
     if ($method === 'GET' && $path === '/api/owner/dashboard') {
         require_user('owner'); $outletId=$ownerOutletId(); [$start,$end,$period]=$ownerDateRange(); $from=$start->format('Y-m-d H:i:sP'); $until=$end->format('Y-m-d H:i:sP');
@@ -446,13 +802,29 @@ try {
         json_out(['ok'=>true]);
     }
     if ($method === 'GET' && $path === '/api/owner/outlet') {
-        require_user('owner'); $q=db()->query('SELECT id,name,address,phone FROM outlets WHERE is_active=TRUE ORDER BY id LIMIT 1'); json_out(['outlet'=>$q->fetch()?:null]);
+        require_user('owner'); $pdo=db();
+        if($attendanceSafeguardsReady($pdo)) $q=$pdo->query('SELECT id,name,address,phone,attendance_latitude,attendance_longitude,attendance_checkout_grace_minutes FROM outlets WHERE is_active=TRUE ORDER BY id LIMIT 1');
+        else $q=$pdo->query('SELECT id,name,address,phone,NULL::numeric AS attendance_latitude,NULL::numeric AS attendance_longitude,30 AS attendance_checkout_grace_minutes FROM outlets WHERE is_active=TRUE ORDER BY id LIMIT 1');
+        json_out(['outlet'=>$q->fetch()?:null,'attendance_settings_ready'=>$attendanceSafeguardsReady($pdo)]);
     }
     if ($method === 'PUT' && $path === '/api/owner/outlet') {
         require_csrf(); require_user('owner'); $input=body(); $name=trim((string)($input['name']??'')); $address=trim((string)($input['address']??'')); $phone=trim((string)($input['phone']??''));
         $nameLength=preg_match_all('/./us',$name); $addressLength=preg_match_all('/./us',$address); $phoneLength=preg_match_all('/./us',$phone);
         if($name===''||$nameLength===false||$nameLength>100||$addressLength===false||$addressLength>500||$phoneLength===false||$phoneLength>30)json_out(['error'=>'Nama outlet wajib diisi; panjang alamat atau telepon tidak valid.'],422);
-        $q=db()->prepare('UPDATE outlets SET name=?,address=?,phone=? WHERE id=(SELECT id FROM outlets WHERE is_active=TRUE ORDER BY id LIMIT 1) RETURNING id,name,address,phone'); $q->execute([$name,$address?:null,$phone?:null]); $outlet=$q->fetch(); if(!$outlet)json_out(['error'=>'Outlet aktif belum tersedia.'],404); json_out(['outlet'=>$outlet]);
+        $pdo=db(); $settingsReady=$attendanceSafeguardsReady($pdo);
+        if(!$settingsReady&&(array_key_exists('attendance_latitude',$input)||array_key_exists('attendance_longitude',$input)||array_key_exists('attendance_checkout_grace_minutes',$input)))json_out(['error'=>'Migration pengaturan absensi belum diterapkan. Data outlet tidak diubah.'],503);
+        if(!$settingsReady) {
+            $q=$pdo->prepare('UPDATE outlets SET name=?,address=?,phone=? WHERE id=(SELECT id FROM outlets WHERE is_active=TRUE ORDER BY id LIMIT 1) RETURNING id,name,address,phone,NULL::numeric AS attendance_latitude,NULL::numeric AS attendance_longitude,30 AS attendance_checkout_grace_minutes');
+            $q->execute([$name,$address?:null,$phone?:null]); $outlet=$q->fetch(); if(!$outlet)json_out(['error'=>'Outlet aktif belum tersedia.'],404); json_out(['outlet'=>$outlet,'attendance_settings_ready'=>false]);
+        }
+        $latitude=trim((string)($input['attendance_latitude']??'')); $longitude=trim((string)($input['attendance_longitude']??''));
+        $grace=filter_var($input['attendance_checkout_grace_minutes']??null,FILTER_VALIDATE_INT);
+        if(($latitude==='')!==($longitude===''))json_out(['error'=>'Latitude dan longitude lokasi outlet harus diisi bersama.'],422);
+        if($latitude!==''&&(!is_numeric($latitude)||!is_finite((float)$latitude)||(float)$latitude < -90||(float)$latitude > 90||!is_numeric($longitude)||!is_finite((float)$longitude)||(float)$longitude < -180||(float)$longitude > 180))json_out(['error'=>'Koordinat lokasi outlet tidak valid.'],422);
+        if($grace===false||$grace<0||$grace>240)json_out(['error'=>'Jeda pulang harus berupa bilangan bulat 0–240 menit.'],422);
+        $q=$pdo->prepare('UPDATE outlets SET name=?,address=?,phone=?,attendance_latitude=?,attendance_longitude=?,attendance_checkout_grace_minutes=? WHERE id=(SELECT id FROM outlets WHERE is_active=TRUE ORDER BY id LIMIT 1) RETURNING id,name,address,phone,attendance_latitude,attendance_longitude,attendance_checkout_grace_minutes');
+        $q->execute([$name,$address?:null,$phone?:null,$latitude===''?null:(float)$latitude,$longitude===''?null:(float)$longitude,$grace]);
+        $outlet=$q->fetch(); if(!$outlet)json_out(['error'=>'Outlet aktif belum tersedia.'],404); json_out(['outlet'=>$outlet,'attendance_settings_ready'=>true]);
     }
     if ($method === 'GET' && $path === '/api/cashier/dashboard') {
         $u=require_user('kasir'); $q=db()->prepare("SELECT id,shift_type,started_at FROM shifts WHERE user_id=? AND status='open' ORDER BY started_at DESC LIMIT 1"); $q->execute([$u['id']]); $shift=$q->fetch();

@@ -69,4 +69,25 @@
 - Setelah persetujuan eksplisit, migration `database/migrations/20261101_001_expense_ledger.sql` diterapkan hanya pada database lokal `KinoKoinLoundry` (`APP_ENV=local`, server `127.0.0.1`). Produksi tidak diubah.
 - Laporan memisahkan nilai transaksi, pembayaran diterima, pengeluaran, serta arus kas bersih; arus kas bersih bukan laba. Penerimaan stok tetap alur terpisah dan dapat tertaut ke expense tanpa mutasi stok ganda.
 - Validasi: `npm.cmd run build`, `php -l api/public/index.php`, dan `php -l api/bootstrap.php` berhasil. Uji database rollback-only pada DB lokal memverifikasi insert/agregat, audit, unique idempotency, aturan sumber QRIS, dan rollback; tidak ada fixture tersisa. Pemeriksaan browser Owner memastikan tema gelap, viewport 390px tanpa overflow horizontal, serta tidak ada filter Kuartal. Upload bukti dan API end-to-end dengan sesi autentik belum diuji; percobaan smoke UI Kasir gagal mendapat sesi auth mock.
-- P1 karyawan/shift dan P2/P3 katalog produk/promo, Google Sheets, serta foto profil belum dikerjakan. Tidak ada commit atau push.
+- Penugasan karyawan/shift, rekonsiliasi, dan P2/P3 katalog produk/promo, Google Sheets, serta foto profil belum dikerjakan. Pembuatan akun absensi karyawan dicatat di tahap lanjutan di bawah. Tidak ada commit atau push.
+
+## Owner — Membuat Akun Karyawan untuk Absensi
+
+- Owner kini dapat melihat dan membuat akun melalui halaman Karyawan & Shift. Akun baru dibuat dengan role `karyawan` saja sehingga login memakai halaman absensi yang sudah tersedia; tidak ada pemilihan role Owner/Kasir.
+- Endpoint `GET/POST /api/owner/employees` dibatasi ke Owner, POST memakai CSRF, memvalidasi nama/nama pengguna/email dan kata sandi awal minimal 12 karakter, menolak username/email duplikat, mengikat ke outlet aktif, serta menyimpan kata sandi dengan `password_hash`.
+- Form tidak mengirim atau menampilkan kembali password dari server; Owner mengatur kata sandi awal dan diminta menyampaikannya langsung ke karyawan. Tidak perlu migration atau dependency baru.
+- Validasi build frontend dan `php -l api/public/index.php` berhasil. UI browser/API terautentikasi belum berhasil divalidasi di sesi ini; tidak ada akun yang dibuat dalam database saat implementasi.
+- Edit/nonaktif akun, reset sandi, histori per karyawan, dan penugasan karyawan pada shift belum termasuk perubahan ini. Tidak ada commit atau push.
+- Form pembuatan sekarang dibuka/tutup dari tombol “Tambah karyawan” di samping “Muat ulang”; daftar akun tetap terlihat sehingga panel lebih ringkas.
+
+## Pengamanan Absensi Pulang
+
+- Status: alur absensi karyawan dan audit Owner telah diimplementasikan; area Kasir tidak diubah.
+- Karyawan hanya dapat check-in pada jadwal yang aktif. Check-in/out memakai geofence radius 100 m; koordinat outlet disetel Owner. Akurasi GPS dibatasi maksimal 100 m dan dicek server bersama usia lokasi maksimal dua menit.
+- Jeda checkout dapat diatur Owner dari Pengaturan Bisnis, 0–240 menit dengan nilai awal 30. Server tetap menolak checkout sebelum jeda selesai, meminta alasan yang diizinkan saat pulang lebih awal, memeriksa selfie gambar asli maksimal 5 MB, dan mengunci catatan agar checkout ganda tidak tercatat.
+- Checkout memerlukan tahan 1,5 detik sebelum kamera dan pratinjau watermark dibuka. Foto disimpan di `api/private/attendance`, tidak di document root, dan hanya dapat diambil oleh Owner outlet atau karyawan pemilik absensi.
+- Karyawan dapat membatalkan checkout selama dua menit. Pembatalan dan koreksi Owner setelah batas itu dicatat sebagai event; Owner dapat meninjau alasan, lokasi, selfie, dan riwayat serta wajib memberi alasan koreksi.
+- Ditambahkan skrip `api/scripts/cleanup_attendance_photos.php` yang menghapus berkas setelah masa simpan 30 hari, tanpa menghapus metadata audit. Skrip perlu dijadwalkan harian oleh Task Scheduler/cron pada lingkungan deployment.
+- Setelah peninjauan dan preflight, migration `20261031_002_attendance_safeguards.sql` diterapkan hanya ke database lokal `KinoKoinLoundry` pada `127.0.0.1`; satu catatan absensi lama tetap dipertahankan dan terpetakan ke shift Sore. Produksi tidak disentuh.
+- Validasi: `npm.cmd run build` dan `php -l` untuk API, bootstrap, serta skrip cleanup berhasil. Uji constraint database rollback-only memastikan shift tak valid dan idempotency duplikat ditolak tanpa meninggalkan data. Smoke test browser dengan API mock memeriksa peringatan pulang awal, alasan, ringkasan konfirmasi/durasi/lokasi, tombol jeda, mode gelap/reduced-motion, dan viewport 390px tanpa overflow atau error JavaScript.
+- Sebelum karyawan dapat absen, Owner harus mengisi latitude/longitude outlet. Verifikasi E2E dengan kamera, GPS perangkat, sesi autentikasi nyata, serta aktivasi job cleanup terjadwal belum dilakukan. Tidak ada dependency, commit, atau push baru.

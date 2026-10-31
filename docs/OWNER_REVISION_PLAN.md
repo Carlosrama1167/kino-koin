@@ -15,7 +15,7 @@ Portal Owner memakai navigasi di `src/features/owner/components/OwnerPortal.jsx`
 | Dashboard Owner | Membaca `/api/owner/dashboard`: pendapatan transaksi lunas, pembayaran menurut metode, status pesanan, grafik, layanan terlaris, stok/koin, absensi hari ini, transaksi dan shift terbaru. Nilainya berasal dari query PostgreSQL; bukan mock pada halaman ini. |
 | Ringkasan kuartal | Tidak ada panel tersendiri bernama rekapitulasi kuartal; filter `Kuartal` pada Dashboard dan Laporan Keuangan telah dihapus dari UI dan validasi periode API. |
 | Laporan Keuangan | Membaca `/api/owner/finance` untuk transaksi, status pembayaran, metode, total pendapatan lunas dan pembayaran tercatat. Kode mendukung expense dan pemisahan basis tanggal; ledger tersedia pada database lokal setelah migration. Produksi belum dimigrasikan. |
-| Karyawan & Shift | `AttendanceAdmin.jsx` hanya menampilkan data absensi aktual yang dibaca dari `/api/attendance`. Belum dapat membuat/mengubah akun, mengaktifkan/nonaktifkan, mengatur ulang sandi, atau melihat riwayat shift per karyawan. |
+| Karyawan & Shift | Menampilkan absensi aktual dari `/api/attendance`, daftar akun karyawan, serta form Owner untuk membuat akun login ber-role `karyawan`. Akun menggunakan login/halaman absensi yang sudah ada. Edit, nonaktifkan, reset sandi, dan riwayat shift per karyawan belum tersedia. |
 | Harga layanan | Membaca `services` dan `service_prices` melalui `/api/owner/services`; perubahan harga normal/malam disimpan melalui `/api/owner/services/price`. Snapshot harga transaksi yang sudah tersimpan tidak berubah. |
 | Produk & stok | Dashboard Owner hanya membaca ringkasan/daftar produk. Pengelolaan dan mutasi stok aktual saat ini berada di Kasir. Belum ada CRUD produk di Owner. |
 | Promo | Belum tersedia. UI menyatakan belum ada tabel atau endpoint promo. |
@@ -38,10 +38,11 @@ Hitungan di atas hanya menggambarkan database lokal saat diperiksa. Tidak diguna
 
 | Kemampuan | Endpoint dan tabel |
 |---|---|
-| Login, role, aktivasi akun, password hash | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`; tabel `users`. Login mencari pengguna aktif dan menggunakan `password_verify`; pembuatan akun CLI menggunakan `password_hash`. |
+| Login, role, aktivasi akun, password hash | `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`; tabel `users`. Login mencari pengguna aktif dan menggunakan `password_verify`; pembuatan akun karyawan Owner menggunakan `password_hash` dan role tetap `karyawan`. |
 | Ringkasan Owner | `GET /api/owner/dashboard`; transaksi, pembayaran, pesanan, kehadiran, katalog produk, koin dan shift. |
 | Laporan transaksi Owner | `GET /api/owner/finance`; `transactions`, `payments`, `customers`. Satu pembayaran per transaksi didukung oleh constraint `payments.transaction_id UNIQUE`. |
-| Daftar absensi Owner | `GET /api/attendance`; `users`, `employee_attendance`, `shifts`. Filter adalah tanggal, nama, shift. Tidak ada endpoint pengelolaan pengguna. |
+| Akun karyawan Owner | `GET/POST /api/owner/employees`; `users`. Owner melihat akun dalam outlet aktif dan membuat akun karyawan dengan nama pengguna unik, kata sandi hash, dan role terkunci `karyawan`. |
+| Daftar absensi Owner | `GET /api/attendance`; `users`, `employee_attendance`, `shifts`. Filter adalah tanggal, nama, shift. |
 | Tarif layanan | `GET /api/owner/services`, `PUT /api/owner/services/price`; `services`, `service_prices`. |
 | Informasi outlet | `GET /api/owner/outlet`, `PUT /api/owner/outlet`; `outlets`. Implementasi memilih outlet aktif pertama secara global. |
 | Katalog produk POS | `GET /api/products`; Kasir membaca `products` yang aktif. |
@@ -55,7 +56,7 @@ Semua endpoint Owner yang ditemukan memerlukan role `owner`; beberapa perubahan 
 
 - **Tidak ditemukan mock data operasional Owner yang dirender oleh halaman Owner aktif.** Dashboard, keuangan, absensi, tarif dan outlet menggunakan API. Data statis yang mungkin masih ada di `src/features/cashier/data/` bukan sumber Owner yang ditinjau.
 - Kode P0 untuk UI Kasir/Owner, endpoint, laporan, audit koreksi, dan tautan stok sudah diterapkan. Schema tersedia pada database lokal; produksi belum dimigrasikan.
-- Akun karyawan hanya dapat dibuat lewat skrip CLI; UI Owner tidak bisa mengelolanya.
+- UI Owner dapat membuat dan melihat akun `karyawan`; edit nama/login, aktif/nonaktif, reset sandi, dan riwayat shift per karyawan belum tersedia. Akun Owner/Kasir tidak dibuat melalui form ini.
 - Daftar absensi ada, tetapi absensi tidak otomatis dikaitkan ke shift: endpoint check-in tidak mengisi `employee_attendance.shift_id`.
 - Sesi shift hanya merekam `shifts.user_id` (akun yang login), jenis shift, waktu mulai/selesai, status. Tidak ada kolom karyawan yang bertugas atau tanggal operasional eksplisit.
 - Produk tersedia pada schema dan dibaca POS; belum ada endpoint/UI Owner untuk membuat, mengubah, menonaktifkan, atau mengatur produk.
@@ -215,8 +216,8 @@ Semua route mutasi harus validasi role, outlet, CSRF, data batas, transaksi data
 | `GET /api/owner/finance` (respons diperluas) | Tersedia; Owner | Metrik, transaksi/pembayaran/pengeluaran; basis tanggal transaksi, pembayaran, dan expense dibedakan. Ledger tersedia setelah migration diterapkan pada target. |
 | `POST /api/shifts/open` (perluasan payload) | Kasir + CSRF | Terima `attendant_user_id`, validasi karyawan aktif, simpan tanggal operasional dan actor; tetap buka manual. |
 | `POST /api/shifts/close` (perluasan payload) | Kasir + CSRF | Terima hitung kas/koin fisik dan persist rekonsiliasi atomik; tidak auto-close. |
-| `GET /api/owner/employees` | Owner | Daftar karyawan, status akun, filter/search. |
-| `POST /api/owner/employees` | Owner + CSRF | Buat akun role karyawan saja, hash password, outlet aktif. |
+| `GET /api/owner/employees` | Tersedia; Owner | Daftar akun karyawan dan status akun pada outlet aktif. |
+| `POST /api/owner/employees` | Tersedia; Owner + CSRF | Buat akun role `karyawan` saja, hash kata sandi di server, outlet aktif; username/email duplikat ditolak. |
 | `PATCH /api/owner/employees/{id}` | Owner + CSRF | Edit identitas dan aktivasi; jangan izinkan role escalation. |
 | `POST /api/owner/employees/{id}/password-reset` | Owner + CSRF | Reset aman dan audit tanpa mengembalikan sandi yang disimpan. |
 | `GET /api/owner/employees/{id}/attendance` | Owner | Riwayat absensi dengan rentang tanggal dan shift. |
@@ -264,7 +265,7 @@ Semua migration harus diuji pada snapshot/DB uji, memiliki preflight, tidak meng
 ## 14. Rencana implementasi bertahap
 
 1. **P0 — Pengeluaran dan keuangan aktual:** kode expense, laporan, audit koreksi, penyimpanan bukti privat, menu Kasir, relasi receipt stok, dan penghapusan periode kuartal diterapkan. Migration sudah aktif pada DB lokal; produksi belum dimigrasikan. Rekonsiliasi kas/koin fisik masih tertunda.
-2. **P1 — Karyawan dan identitas shift:** tetapkan aturan satu akun Kasir per outlet, petugas, tanggal operasional dan reminder; preflight akun; migration shift aditif; API employee/attendance/shift; UI manajemen; buka/tutup dan reminder tetap manual.
+2. **P1 — Karyawan dan identitas shift:** pembuatan/list akun karyawan dengan role absensi saja sudah diimplementasikan tanpa migration. Edit/nonaktif/reset password, riwayat per karyawan, assignment petugas, tanggal operasional, dan reminder masih perlu dikerjakan; migration shift aditif baru setelah preflight dan persetujuan.
 3. **P2 — Produk dan promo:** tambah CRUD Owner pada katalog yang dipakai POS, kategori, lifecycle/stok; putuskan stockless handling; definisikan kebijakan promo/membership/malam sebelum menambah migration/checkout logic.
 4. **P3 — Google Sheets dan foto profil:** siapkan kredensial/izin dan worker; unggah foto dengan storage privat. Penyederhanaan periode kuartal sudah diterapkan pada P0 tanpa migration.
 5. Jangan mengubah backend produksi atau mengaktifkan eksternal sebelum uji staging, backup, dan persetujuan deploy. Tiap tahap harus dapat dirilis terpisah dan menghindari perubahan lintas prioritas yang tidak perlu.
@@ -319,9 +320,10 @@ UI periode kuartal tidak memerlukan migration. Filter telah dihapus dari fronten
 
 ### P1
 
-- `src/features/owner/components/AttendanceAdmin.jsx`, `src/features/cashier/CashierApp.jsx`, komponen shift Kasir.
-- `api/public/index.php`, kemungkinan `api/bootstrap.php` hanya jika helper policy diperlukan.
-- Migration untuk assignment personel/tanggal operasional/rekonsiliasi serta kemungkinan flag akun.
+- `src/features/owner/components/AttendanceAdmin.jsx`, `src/features/owner/styles/employee-management.css`: form/list akun absensi karyawan sudah diimplementasikan.
+- `api/public/index.php`: route list/create Owner sudah diimplementasikan; akun dibuat sebagai role `karyawan` dengan `password_hash`.
+- `src/features/cashier/CashierApp.jsx` dan komponen shift Kasir untuk assignment petugas masih perlu diubah setelah aturan shift disepakati.
+- Migration untuk assignment personel/tanggal operasional/rekonsiliasi serta kemungkinan flag akun masih belum dibuat.
 
 ### P2
 
@@ -348,5 +350,5 @@ UI periode kuartal tidak memerlukan migration. Filter telah dihapus dari fronten
 - Implementasi P0 mencakup front controller PHP dan frontend; tidak ada dependency baru.
 - Migration `20261101_001_expense_ledger.sql` diterapkan pada DB lokal `KinoKoinLoundry` setelah persetujuan pengguna. Produksi tidak dimigrasikan.
 - Struktur DB lokal lolos uji insert/agregat, audit, unique idempotency, aturan sumber QRIS, dan rollback-only tanpa menyisakan fixture. Sumber dana QRIS dikonfirmasi sebagai rekening usaha. Rekonsiliasi kas/koin fisik belum dibuat.
-- P1 karyawan/assignment shift/reminder, P2 CRUD produk/promo, serta P3 Sheets/foto profil tetap belum diimplementasikan.
-- Build frontend dan pemeriksaan sintaks PHP berhasil. Upload bukti dan alur HTTP expense end-to-end masih perlu diuji dengan sesi Kasir/Owner dan bukti valid.
+- P1: pembuatan/list akun karyawan untuk login absensi telah diimplementasikan, tanpa migration. Edit/nonaktif/reset password, riwayat per karyawan, assignment karyawan pada shift, reminder, dan rekonsiliasi masih belum selesai. P2 CRUD produk/promo dan P3 Sheets/foto profil belum diimplementasikan.
+- Build frontend dan pemeriksaan sintaks PHP berhasil untuk implementasi expense dan akun karyawan. Pengujian UI browser dan API akun terautentikasi belum selesai pada sesi ini.

@@ -12,6 +12,7 @@ yarn-debug.log*
 # Uploads Lokal (Agar foto dummy saat testing tidak mengotori Git)
 /public/uploads/*
 !/public/uploads/.gitkeep
+/api/private/
 .opencode/docs/
 .opencode/rules.md
 .repomixignore

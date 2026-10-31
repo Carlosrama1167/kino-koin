@@ -217,14 +217,23 @@ function IntegrationStatus() {
 
 function BusinessSettings({ notify }) {
   const [outlet, setOutlet] = useState(null)
-  const [form, setForm] = useState({ name: '', address: '', phone: '' })
+  const [form, setForm] = useState({ name: '', address: '', phone: '', attendance_latitude: '', attendance_longitude: '', attendance_checkout_grace_minutes: 30 })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [attendanceSettingsReady, setAttendanceSettingsReady] = useState(true)
   useEffect(() => {
     api('/api/owner/outlet').then(result => {
       setOutlet(result.outlet)
-      if (result.outlet) setForm({ name: result.outlet.name || '', address: result.outlet.address || '', phone: result.outlet.phone || '' })
+      setAttendanceSettingsReady(result.attendance_settings_ready !== false)
+      if (result.outlet) setForm({
+        name: result.outlet.name || '',
+        address: result.outlet.address || '',
+        phone: result.outlet.phone || '',
+        attendance_latitude: result.outlet.attendance_latitude ?? '',
+        attendance_longitude: result.outlet.attendance_longitude ?? '',
+        attendance_checkout_grace_minutes: result.outlet.attendance_checkout_grace_minutes ?? 30,
+      })
     }).catch(reason => setError(reason.message)).finally(() => setLoading(false))
   }, [])
   const save = async event => {
@@ -232,7 +241,8 @@ function BusinessSettings({ notify }) {
     if (!form.name.trim()) { setError('Nama outlet wajib diisi.'); return }
     setSaving(true); setError('')
     try {
-      const result = await api('/api/owner/outlet', { method: 'PUT', body: JSON.stringify(form) })
+      const payload = attendanceSettingsReady ? form : { name: form.name, address: form.address, phone: form.phone }
+      const result = await api('/api/owner/outlet', { method: 'PUT', body: JSON.stringify(payload) })
       setOutlet(result.outlet); notify('Informasi outlet tersimpan.')
     } catch (reason) { setError(reason.message) }
     finally { setSaving(false) }
@@ -245,13 +255,24 @@ function BusinessSettings({ notify }) {
         <label>Nama outlet<input required maxLength="100" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })}/></label>
         <label>Alamat<textarea maxLength="500" value={form.address} onChange={event => setForm({ ...form, address: event.target.value })}/></label>
         <label>Nomor telepon<input maxLength="30" value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })}/></label>
-        <button className="owner-module-button primary" disabled={saving}>{saving ? 'Menyimpan…' : 'Simpan perubahan'}</button>
+        <div className="owner-module-note"><Settings2 size={16}/> Nama dan alamat dipakai untuk informasi outlet pada aplikasi.</div>
       </section>
-      <section className="owner-module-card"><div className="module-heading"><div><h3>Aturan operasional</h3><p>Nilai layanan dan zona waktu tidak memiliki pengaturan tersimpan.</p></div></div>
+      <section className="owner-module-card"><div className="module-heading"><div><h3>Pengaturan absensi</h3><p>Jeda pulang dan area GPS untuk akun karyawan.</p></div></div>
+        {!attendanceSettingsReady && <div className="owner-state error" role="alert">Migration pengaman absensi belum diterapkan. Pengaturan lokasi dan jeda belum dapat disimpan.</div>}
+        <label>Jeda minimum sebelum absen pulang (menit)<input type="number" min="0" max="240" step="1" required disabled={!attendanceSettingsReady} value={form.attendance_checkout_grace_minutes} onChange={event => setForm({ ...form, attendance_checkout_grace_minutes: event.target.value })}/></label>
+        <div className="employee-location-fields">
+          <label>Latitude outlet<input type="number" min="-90" max="90" step="any" disabled={!attendanceSettingsReady} value={form.attendance_latitude} onChange={event => setForm({ ...form, attendance_latitude: event.target.value })} placeholder="-6.2000000"/></label>
+          <label>Longitude outlet<input type="number" min="-180" max="180" step="any" disabled={!attendanceSettingsReady} value={form.attendance_longitude} onChange={event => setForm({ ...form, attendance_longitude: event.target.value })} placeholder="106.8166667"/></label>
+        </div>
+        <div className="owner-module-note"><Settings2 size={16}/> Jeda awal 30 menit, dapat diatur 0–240 menit. Radius GPS tetap 100 meter. Isi kedua koordinat outlet agar karyawan bisa melakukan absensi berbasis lokasi.</div>
+        <label className="employee-location-consent"><input type="checkbox" required disabled={!attendanceSettingsReady}/> Saya memastikan koordinat outlet benar dan memahami lokasi digunakan untuk memvalidasi absensi.</label>
+        <button className="owner-module-button primary" disabled={saving}>{saving ? 'Menyimpan…' : attendanceSettingsReady ? 'Simpan pengaturan outlet & absensi' : 'Simpan informasi outlet'}</button>
+      </section>
+      <section className="owner-module-card"><div className="module-heading"><div><h3>Aturan operasional</h3><p>Informasi waktu aplikasi dan pembayaran.</p></div></div>
         <div className="owner-settings-fact"><span>Zona waktu aplikasi</span><b>Asia/Jakarta</b></div>
         <div className="owner-settings-fact"><span>Jam harga malam</span><b>23.00–05.59 WIB</b></div>
         <div className="owner-settings-fact"><span>Metode bayar POS</span><b>Tunai · QRIS</b></div>
-        <div className="owner-module-note"><Settings2 size={16}/> Jam, promo, dan preferensi lain belum tersedia sebagai pengaturan backend.</div>
+        <div className="owner-module-note"><Settings2 size={16}/> Promo dan preferensi lainnya belum tersedia sebagai pengaturan backend.</div>
       </section>
     </form> : <EmptyState title="Outlet belum tersedia" detail="Tambahkan outlet aktif ke database sebelum mengubah informasi bisnis."/>}
   </div>

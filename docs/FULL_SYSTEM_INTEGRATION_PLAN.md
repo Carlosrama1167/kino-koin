@@ -366,6 +366,13 @@ Tidak ada test runner aplikasi yang ditemukan pada `package.json`; script yang t
 - Kasir mendapat menu Pengeluaran. Penerimaan stok tetap alur terpisah; expense pembelian dapat ditautkan pada mutation dan retry receipt tidak menambah stok ganda.
 - Filter kuartal di Dashboard Owner dan Laporan Keuangan dihapus. Periode rolling 7 hari diberi label `7 hari terakhir`.
 - Migration diterapkan hanya pada database lokal `KinoKoinLoundry` setelah persetujuan eksplisit; produksi tidak dimigrasikan. Tidak ada data bisnis yang dibuat atau diubah secara permanen.
-- Verifikasi kode: build Vite dan `php -l` untuk API/bootstrap berhasil. Uji rollback-only lokal membuktikan insert/agregat, audit, penolakan idempotency duplikat, batas sumber QRIS, dan rollback tanpa fixture tersisa. Upload bukti dan API end-to-end dengan sesi autentik masih perlu diuji. P1 (karyawan/shift), rekonsiliasi fisik, P2 (CRUD produk/promo), dan P3 (Sheets/foto) tetap menunggu tahap implementasi masing-masing.
+- Verifikasi kode: build Vite dan `php -l` untuk API/bootstrap berhasil. Uji rollback-only lokal membuktikan insert/agregat, audit, penolakan idempotency duplikat, batas sumber QRIS, dan rollback tanpa fixture tersisa. Upload bukti dan API end-to-end dengan sesi autentik masih perlu diuji. Penugasan karyawan/shift, rekonsiliasi fisik, P2 (CRUD produk/promo), dan P3 (Sheets/foto) tetap menunggu tahap implementasi masing-masing.
+
+## Pembaruan P1 — akun karyawan untuk absensi
+
+- Owner dapat melihat dan membuat akun karyawan melalui halaman Karyawan & Shift.
+- Endpoint `GET/POST /api/owner/employees` hanya dapat diakses Owner; pembuatan membutuhkan CSRF, mengikat akun ke outlet aktif, mengunci role menjadi `karyawan`, memvalidasi username/email, dan menyimpan kata sandi dengan `password_hash`.
+- Tidak ada perubahan schema/migration: tabel `users` sudah mendukung role tersebut. Login yang sudah ada menerima username/email dan mengarahkan role `karyawan` ke halaman absensi.
+- Akun yang dibuat tidak mendapatkan akses Owner/Kasir. Edit/nonaktif/reset sandi, riwayat per orang, assignment pada sesi shift, dan rekonsiliasi masih belum termasuk.
 
 Audit awal tetap menjadi baseline historis. Implementasi sudah berjalan; status terkini, validasi, dan batas fitur dicatat pada bagian awal dokumen ini.
