@@ -1,0 +1,18 @@
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import Root from './app/Root'
+import './style.css'
+import './features/cashier/styles/pages.css'
+import './features/cashier/styles/history.css'
+import './features/cashier/styles/operations.css'
+import './features/cashier/styles/reports.css'
+import './features/owner/styles/owner.css'
+import './shared/styles/entry.css'
+import './shared/styles/typography.css'
+import './features/owner/styles/owner-single-outlet.css'
+import './features/owner/styles/owner-dashboard.css'
+import './features/cashier/styles/cashier-redesign.css'
+import './features/owner/styles/owner-motion.css'
+import './features/auth/login.css'
+
+createRoot(document.getElementById('root')).render(<React.StrictMode><Root /></React.StrictMode>)

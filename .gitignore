@@ -1,0 +1,27 @@
+# Dependensi / Pustaka Aplikasi
+/node_modules
+/vendor
+npm-debug.log*
+yarn-debug.log*
+
+# File Lingkungan & Kredensial Rahasia (Sangat Penting)
+.env
+.env.local
+.env.production
+
+# Uploads Lokal (Agar foto dummy saat testing tidak mengotori Git)
+/public/uploads/*
+!/public/uploads/.gitkeep
+.opencode/docs/
+.opencode/rules.md
+.repomixignore
+repomix-output.xml
+repomix.config.json
+
+# System & IDE Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+!/public/uploads/products/
+!/public/uploads/products/.gitkeep

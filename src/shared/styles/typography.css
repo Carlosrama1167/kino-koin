@@ -1,0 +1,151 @@
+:root {
+  font-family: Inter, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: Inter, Arial, sans-serif;
+}
+
+body {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+button,
+.btn {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+.btn-primary,
+.pay-button,
+.confirm-payment {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+input,
+select,
+textarea {
+  font-size: 14px;
+  font-weight: 400;
+}
+
+label,
+.owner-input-label,
+.cash-section label,
+.inventory-qty {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+.topbar h1,
+.welcome-row h2,
+.page-intro h2,
+.history-hero h2,
+.owner-dashboard-top h2,
+.attendance-body h1,
+.owner-login-form h2 {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+}
+
+.pos-header h3,
+.panel-heading h3,
+.owner-section-title h3,
+.owner-panel-heading h3,
+.module-heading h3,
+.shift-detail-head h3 {
+  font-family: 'Plus Jakarta Sans', sans-serif !important;
+  font-size: 18px !important;
+  font-weight: 600 !important;
+}
+
+.stat-card h3,
+.service-name,
+.history-table-heading h3,
+.inventory-toolbar h3,
+.drawer-heading h2,
+.payment-modal h2,
+.owner-module-card h3 {
+  font-family: Inter, Arial, sans-serif !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+.service-price {
+  font-family: Inter, Arial, sans-serif !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+}
+
+.payment-total > b {
+  font-family: Inter, Arial, sans-serif !important;
+  font-size: 32px !important;
+  font-weight: 700 !important;
+}
+
+.total-row b {
+  font-family: Inter, Arial, sans-serif !important;
+  font-size: 28px !important;
+  font-weight: 700 !important;
+}
+
+.history-table,
+.orders-table,
+.inventory-table,
+.coin-history-table,
+.attendance-admin-table {
+  font-family: Inter, Arial, sans-serif;
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+
+.history-table th,
+.orders-table th,
+.inventory-table th,
+.coin-history-table th,
+.attendance-admin-table th {
+  font-weight: 500 !important;
+}
+
+.history-table td b,
+.orders-table td b,
+.inventory-table td b,
+.coin-history-table td b,
+.attendance-admin-table td b {
+  font-weight: 500 !important;
+}
+
+.history-hero p,
+.page-intro p,
+.welcome-row p,
+.pos-header p,
+.panel-heading p,
+.owner-dashboard-top p,
+.owner-form-description {
+  font-size: 14px !important;
+  font-weight: 400 !important;
+}
+
+.history-metric small,
+.stat-bottom small,
+.service-note,
+.breadcrumb,
+.today-chip,
+.owner-caption,
+.caption {
+  font-size: 12px;
+  font-weight: 400;
+}

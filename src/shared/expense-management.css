@@ -1,0 +1,354 @@
+.expense-panel {
+  padding: 18px;
+}
+
+.expense-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.expense-panel-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font: 700 15px/1.4 'Plus Jakarta Sans', Inter, Arial, sans-serif;
+}
+
+.expense-panel-heading p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.expense-panel-heading > svg,
+.expense-list-icon {
+  color: var(--blue, #0878f9);
+}
+
+.expense-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.expense-form-grid label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.expense-form-grid input,
+.expense-form-grid select {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font: 500 13px Inter, Arial, sans-serif;
+}
+
+.expense-form-grid input:focus,
+.expense-form-grid select:focus {
+  border-color: #0878f9;
+  box-shadow: 0 0 0 2px rgb(8 120 249 / 15%);
+}
+
+.expense-field-wide {
+  grid-column: 1 / -1;
+}
+
+.expense-upload > span:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.expense-upload small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.expense-upload-control {
+  position: relative;
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  padding: 8px 11px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.expense-upload-control input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.expense-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.expense-message svg {
+  flex: 0 0 auto;
+}
+
+.expense-message.error {
+  background: #fff0ef;
+  color: #b42318;
+}
+
+.expense-message.success {
+  background: #eafaf3;
+  color: #087a55;
+}
+
+.expense-form-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.expense-form-actions p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.expense-current-shift {
+  align-self: center;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.expense-submit {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  background: #0878f9;
+  color: #fff;
+  font: 600 12px Inter, Arial, sans-serif;
+  cursor: pointer;
+}
+
+.expense-submit:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.expense-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.expense-list-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.expense-list-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--blue-soft, #edf5ff);
+}
+
+.expense-list-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.expense-list-copy b,
+.expense-list-value b {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.expense-list-copy small,
+.expense-list-value a {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.expense-list-value {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+.expense-list-value a {
+  color: #0878f9;
+  text-decoration: none;
+}
+
+.expense-empty {
+  padding: 22px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.dark .expense-panel,
+.owner-portal.dark .expense-panel {
+  background: var(--surface);
+}
+
+.dark .expense-message.error,
+.owner-portal.dark .expense-message.error {
+  background: rgb(180 35 24 / 15%);
+  color: #ffaaa3;
+}
+
+.dark .expense-message.success,
+.owner-portal.dark .expense-message.success {
+  background: rgb(8 122 85 / 18%);
+  color: #83dcb9;
+}
+
+.owner-portal .expense-form-grid label {
+  color: var(--owner-muted);
+}
+
+.owner-portal .expense-form-grid input,
+.owner-portal .expense-form-grid select,
+.owner-portal .expense-upload-control {
+  border-color: var(--owner-line);
+  background: var(--owner-surface);
+  color: var(--owner-text);
+}
+
+.owner-portal .expense-list-item {
+  border-color: var(--owner-line);
+}
+
+.owner-portal .expense-list-copy b,
+.owner-portal .expense-list-value b {
+  color: var(--owner-text);
+}
+
+.owner-portal .expense-list-copy small,
+.owner-portal .expense-list-value a,
+.owner-portal .expense-form-actions p,
+.owner-portal .expense-current-shift {
+  color: var(--owner-muted);
+}
+
+.owner-portal.dark .expense-list-item {
+  border-color: var(--owner-line);
+}
+
+.owner-portal.dark .expense-list-copy b,
+.owner-portal.dark .expense-list-value b {
+  color: var(--owner-text);
+}
+
+.owner-expense-edit {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--owner-line);
+}
+
+.owner-expense-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.owner-expense-actions .owner-module-button {
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 10px;
+}
+
+.owner-expense-audit {
+  display: flex;
+  flex-direction: column;
+}
+
+.owner-expense-audit article {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0;
+  border-top: 1px solid var(--owner-line);
+}
+
+.owner-expense-audit article > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--owner-text);
+  font-size: 12px;
+}
+
+.owner-expense-audit article p,
+.owner-expense-audit article > small {
+  margin: 0;
+  color: var(--owner-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (max-width: 560px) {
+  .expense-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .expense-field-wide {
+    grid-column: auto;
+  }
+
+  .expense-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .expense-submit {
+    width: 100%;
+  }
+}

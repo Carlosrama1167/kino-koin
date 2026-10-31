@@ -1,0 +1,51 @@
+.owner-outlet-select {
+  cursor: default;
+}
+
+.owner-outlet-select > div {
+  flex: 1;
+}
+
+.owner-single-outlet-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #0878f9;
+  background: #edf5ff;
+  border: 1px solid #dcecff;
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.owner-analytics-grid {
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+  gap: 16px;
+}
+
+.owner-dashboard-page {
+  gap: 18px;
+}
+
+.owner-section-title {
+  margin-bottom: -6px;
+}
+
+.owner-panel {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .owner-analytics-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .owner-single-outlet-badge {
+    padding: 6px 9px;
+    font-size: 11px;
+  }
+}

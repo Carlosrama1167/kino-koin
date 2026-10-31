@@ -1,0 +1,17 @@
+.inventory-expense-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: #b7791f;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.inventory-expense-warning svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.dark .inventory-expense-warning {
+  color: #f0c277;
+}

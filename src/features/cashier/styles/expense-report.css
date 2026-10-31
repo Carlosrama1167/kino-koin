@@ -1,0 +1,42 @@
+.shift-metric-icon.orange {
+  background: #fff3e8;
+  color: #d97706;
+}
+
+.shift-expense-breakdown {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.shift-expense-breakdown > div:not(.shift-breakdown-title) {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.shift-expense-breakdown > div > b {
+  color: var(--text);
+}
+
+.shift-expense-breakdown .shift-payment-total {
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+}
+
+.shift-expense-breakdown .shift-payment-total > span {
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.shift-cash-estimate {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 7px;
+  line-height: 1.45;
+}
