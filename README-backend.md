@@ -17,7 +17,7 @@ Dokumentasi arsitektur, endpoint, skema data, dan alur fitur berdasarkan impleme
 
 Contoh menggunakan psql: `psql -U postgres -d kino_koin -f database/schema.sql` lalu `psql -U postgres -d kino_koin -f database/seed.sql`.
 
-Untuk database yang sudah berjalan, terapkan migration yang belum dijalankan sesuai urutan nama file: `20261102_001_self_service_line_weights.sql`, lalu `20261102_002_membership_and_dropoff_dry.sql`. Schema baru sudah menyertakan perubahan tersebut; migration tidak dijalankan otomatis oleh aplikasi. Fitur Membership di UI/API memerlukan kedua migration pada database existing.
+Untuk database yang sudah berjalan, terapkan migration yang belum dijalankan sesuai urutan nama file: `20261102_001_self_service_line_weights.sql`, lalu `20261102_002_membership_and_dropoff_dry.sql`. Pastikan migration dijalankan pada database dan schema yang sama dengan konfigurasi backend (`DB_NAME` dan `search_path` PostgreSQL); migration 001 dapat dijalankan ulang jika sebelumnya gagal. Schema baru sudah menyertakan perubahan tersebut; migration tidak dijalankan otomatis oleh aplikasi. Fitur Membership di UI/API memerlukan kedua migration pada database existing.
 
 ## Menjalankan aplikasi lokal
 

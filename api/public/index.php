@@ -137,6 +137,25 @@ $membershipSchemaReady = static function (PDO $pdo): bool {
 $requireMembershipSchema = static function (PDO $pdo) use ($membershipSchemaReady): void {
     if (!$membershipSchemaReady($pdo)) json_out(['error'=>'Migration membership belum diterapkan pada database.'],503);
 };
+$requireTransactionItemWeightSchema = static function (PDO $pdo): void {
+    $context=$pdo->query("SELECT current_database() AS database_name,
+      COALESCE(current_schema(),'(tidak ada)') AS schema_name,
+      current_setting('search_path') AS search_path,
+      COALESCE(to_regclass('transaction_items')::text,'(tabel tidak ditemukan)') AS transaction_items_table")->fetch();
+    $q=$pdo->query("SELECT required.column_name
+      FROM (VALUES ('weight_kg'),('washer_machine_count'),('dryer_machine_count')) AS required(column_name)
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid=to_regclass('transaction_items')
+          AND attname=required.column_name
+          AND attnum>0 AND NOT attisdropped
+      )
+      ORDER BY required.column_name");
+    $missing=$q->fetchAll(PDO::FETCH_COLUMN);
+    if ($missing) {
+        json_out(['error'=>'Database backend "'.$context['database_name'].'" (schema aktif "'.$context['schema_name'].'", search_path "'.$context['search_path'].'") menggunakan tabel '.$context['transaction_items_table'].' yang belum memiliki kolom: '.implode(', ',$missing).'. Jalankan migration database/migrations/20261102_001_self_service_line_weights.sql pada koneksi database/schema tersebut, lalu coba lagi.'],503);
+    }
+};
 try {
     if ($method === 'GET' && $path === '/api/auth/csrf') {
         $_SESSION['csrf'] ??= bin2hex(random_bytes(32)); json_out(['csrf'=>$_SESSION['csrf']]);
@@ -1401,6 +1420,12 @@ try {
                 $q->execute([$existing['id']]); $membershipStamp=$q->fetch()?:null;
             }
             unset($existing['request_hash']); json_out(['transaction'=>$existing,'change'=>(float)$existing['change_amount'],'duplicate'=>true,'membership_stamp'=>$membershipStamp]);
+        }
+        foreach ($lines as $line) {
+            if (is_array($line) && !empty($line['service_id']) && empty($line['product_id'])) {
+                $requireTransactionItemWeightSchema($pdo);
+                break;
+            }
         }
         $membershipMemberId=null;
         if (isset($i['membership_member_id']) && $i['membership_member_id']!=='') {
