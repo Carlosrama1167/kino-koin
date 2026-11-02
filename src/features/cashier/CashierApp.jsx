@@ -173,7 +173,8 @@ export default function App({ user, onLogout }) {
   const changeLineWeight = (cartKey, weightKg) => setCart(current => current.map(i => i.cartKey === cartKey ? { ...i, weightKg } : i))
   const removeLine = cartKey => setCart(current => current.filter(i => i.cartKey !== cartKey))
   const selectNav = (name) => { setActive(name); setMobileMenu(false) }
-  const paid = async (paymentMethod = method === 'QRIS' ? 'qris' : 'tunai') => {
+  const paid = async (paymentMethod = method === 'QRIS' ? 'qris' : 'tunai', confirmQris = false) => {
+    if (confirmQris && !window.confirm('Pastikan speaker pembayaran berbunyi dan dana QRIS telah masuk sebelum mengonfirmasi pembayaran.')) return
     const payload = {
       payment_method: paymentMethod,
       cash_received: paymentMethod === 'tunai' ? Number(cash || 0) : 0,
@@ -203,7 +204,14 @@ export default function App({ user, onLogout }) {
         headers: { 'Idempotency-Key': requestRef.current.key },
         body: JSON.stringify(payload),
       })
-      const transaction = result.transaction
+      let transaction = result.transaction
+      if (confirmQris) {
+        await api(`/api/transactions/${transaction.id}/confirm-payment`, {
+          method: 'POST',
+          body: JSON.stringify({ payment_method: 'qris' }),
+        })
+        transaction = { ...transaction, payment_method: 'qris', payment_status: 'lunas' }
+      }
       const receiptItems = cart.map(item => {
         const quantity = lineQuantity(item)
         const machines = selfServiceMachineCount(item)
@@ -350,11 +358,11 @@ export default function App({ user, onLogout }) {
       </div>
       </div>
       <div className="checkout-payment-column"><div className="method-label">Metode pembayaran</div><div className="payment-methods"><button className={`method-card ${method === 'Tunai' ? 'chosen' : ''}`} onClick={() => setMethod('Tunai')} disabled={submitting}><div className="method-icon cash"><Wallet size={19}/></div><span><b>Tunai</b><small>Bayar langsung</small></span><span className="radio-dot"/></button><button className={`method-card ${method === 'QRIS' ? 'chosen' : ''}`} onClick={() => setMethod('QRIS')} disabled={submitting}><div className="method-icon qris"><CreditCard size={19}/></div><span><b>QRIS</b><small>Belum diverifikasi</small></span><span className="radio-dot"/></button></div>
-      {method === 'Tunai' ? <div className="cash-section"><label>Uang diterima<input value={cash} onChange={e => setCash(e.target.value)} placeholder="Masukkan nominal" inputMode="numeric" /></label><div className="quick-cash">{[total, 50000, 100000].filter((v, i, a) => v > 0 && a.indexOf(v) === i).map(n => <button key={n} onClick={() => setCash(String(n))}>{n === total ? 'Uang pas' : money(n)}</button>)}</div><div className="change-row"><span>Kembalian</span><b>{money(Math.max(0, Number(cash || 0) - total))}</b></div></div> : <div className="qris-box"><CreditCard size={21}/><span><b>QRIS belum terverifikasi</b><small>Transaksi akan tersimpan dengan status belum dibayar. Jangan serahkan barang sebagai lunas sebelum pembayaran diverifikasi.</small></span></div>}
+      {method === 'Tunai' ? <div className="cash-section"><label>Uang diterima<input value={cash} onChange={e => setCash(e.target.value)} placeholder="Masukkan nominal" inputMode="numeric" /></label><div className="quick-cash">{[total, 50000, 100000].filter((v, i, a) => v > 0 && a.indexOf(v) === i).map(n => <button key={n} onClick={() => setCash(String(n))}>{n === total ? 'Uang pas' : money(n)}</button>)}</div><div className="change-row"><span>Kembalian</span><b>{money(Math.max(0, Number(cash || 0) - total))}</b></div></div> : <div className="qris-box"><CreditCard size={21}/><span><b>Konfirmasi QRIS melalui speaker</b><small>Tunggu speaker pembayaran berbunyi dan pastikan nominal sesuai. Setelah itu pilih konfirmasi QRIS. Jika belum terdengar, simpan transaksi sebagai belum dibayar.</small></span></div>}
       {!checkoutWeightsValid && <div className="checkout-error" role="alert">Isi berat yang valid untuk setiap baris layanan sebelum menyimpan transaksi.</div>}
       {checkoutError && <div className="checkout-error" role="alert">{checkoutError}</div>}
-      <button className="btn btn-primary confirm-payment" onClick={() => paid()} disabled={submitting || !checkoutWeightsValid || (method === 'Tunai' && Number(cash || 0) < total)}><Check size={17}/>{submitting ? 'Menyimpan transaksi…' : method === 'Tunai' ? 'Konfirmasi pembayaran tunai' : 'Simpan QRIS belum terverifikasi'}</button>
-      <button className="btn btn-secondary confirm-payment" onClick={() => paid(null)} disabled={submitting || !checkoutWeightsValid}>{submitting ? 'Menyimpan transaksi…' : 'Simpan sebagai belum dibayar'}</button>
+      <button className="btn btn-primary confirm-payment" onClick={() => paid(method === 'QRIS' ? 'qris' : 'tunai', method === 'QRIS')} disabled={submitting || !checkoutWeightsValid || (method === 'Tunai' && Number(cash || 0) < total) || (method === 'QRIS' && total <= 0)}><Check size={17}/>{submitting ? 'Menyimpan transaksi…' : method === 'Tunai' ? 'Konfirmasi pembayaran tunai' : 'Speaker berbunyi · Konfirmasi QRIS'}</button>
+      <button className="btn btn-secondary confirm-payment" onClick={() => paid(method === 'QRIS' ? 'qris' : null)} disabled={submitting || !checkoutWeightsValid}>{submitting ? 'Menyimpan transaksi…' : method === 'QRIS' ? 'Simpan QRIS belum dibayar' : 'Simpan sebagai belum dibayar'}</button>
       <div className="modal-secure"><Check size={13}/> Keranjang hanya dikosongkan setelah transaksi berhasil disimpan.</div>
       </div>
       </div>

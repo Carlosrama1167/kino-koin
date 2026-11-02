@@ -32,7 +32,7 @@ Dokumen ini menggambarkan alur yang tersedia pada kode saat audit 31 Oktober 202
 2. Jika tidak ada sesi terbuka, pilih jenis shift dan panggil `/api/shifts/open`.
 3. Pilih layanan/produk yang dibaca dari `/api/services` dan `/api/products`.
 4. Checkout mengirim `/api/transactions`; server menghitung harga, memeriksa shift/stok, dan menyimpan record terkait secara atomik/idempoten.
-5. Pembayaran/pelunasan tercatat pada `payments` dan shift penerima.
+5. Pembayaran/pelunasan tercatat pada `payments` dan shift penerima. Untuk QRIS manual, Kasir menunggu speaker pembayaran berbunyi dan memeriksa nominal, lalu menekan konfirmasi QRIS pada checkout; jika belum ada notifikasi, transaksi bisa disimpan belum dibayar dan dikonfirmasi kemudian dari Riwayat Transaksi.
 6. Sesi ditutup manual melalui `/api/shifts/close`; rekap belum memiliki input hitung fisik kas/koin.
 7. Tidak ada alur Pengeluaran Kasir yang tersimpan di database pada kondisi saat audit.
 
