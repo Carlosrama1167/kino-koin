@@ -9,9 +9,11 @@ import CoinManagement from './components/CoinManagement'
 import SettingsPage from './components/SettingsPage'
 import HelpPage from './components/HelpPage'
 import ShiftReports from './components/ShiftReports'
+import MembershipPicker from './components/MembershipPicker'
 import ExpensePage from '../../shared/ExpenseManagement'
 import { api } from '../../shared/api'
 import './styles/checkout.css'
+import './styles/membership.css'
 
 const icons = { Dashboard: LayoutDashboard, 'Transaksi Baru': ShoppingCart, 'Pesanan Laundry': Shirt, 'Riwayat Transaksi': Clock3, 'Produk & Stok': Package, 'Manajemen Koin': Coins, Laporan: Activity, Pengeluaran: ReceiptText, Bantuan: CircleHelp }
 const money = (n) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n)
@@ -27,6 +29,7 @@ export default function App({ user, onLogout }) {
   const [method, setMethod] = useState('Tunai')
   const [cash, setCash] = useState('')
   const [checkoutDetails, setCheckoutDetails] = useState({ customerName: '', customerPhone: '', weightKg: '', notes: '', deliveryFee: '0', discountAmount: '0' })
+  const [selectedMember, setSelectedMember] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
   const [success, setSuccess] = useState(null)
@@ -74,15 +77,21 @@ export default function App({ user, onLogout }) {
   useEffect(() => { window.localStorage.setItem('kino-theme', dark ? 'dark' : 'light') }, [dark])
   const today = new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Jakarta' }).format(now)
   const time = new Intl.DateTimeFormat('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' }).format(now)
-  const selfServiceMachineCount = Number(checkoutDetails.weightKg) > 0 ? Math.ceil(Number(checkoutDetails.weightKg) / 7) : 1
+  const isSelfServiceItem = item => item.serviceCategory === 'Self Service'
+  const selfServiceMachineCount = item => {
+    const weight = Number(item.weightKg)
+    const roundedWeight = Math.round(weight * 100) / 100
+    return Number.isFinite(weight) && roundedWeight > 0 ? Math.ceil(roundedWeight / 7) : 0
+  }
   const lineQuantity = (item) => {
+    if (isSelfServiceItem(item)) return selfServiceMachineCount(item) * item.qty
     if (item.unit === 'kg') return Number(checkoutDetails.weightKg || 0) * item.qty
-    if (item.serviceCategory === 'Self Service' && item.unit === 'siklus' && Number(checkoutDetails.weightKg) > 0) return selfServiceMachineCount * item.qty
+    if (item.unit === '7kg') return Math.ceil(Number(checkoutDetails.weightKg || 0) / 7)
     return item.qty
   }
   const coinEstimate = cart.reduce((needs, item) => {
-    if (item.serviceCategory !== 'Self Service') return needs
-    const machines = selfServiceMachineCount * item.qty
+    if (!isSelfServiceItem(item)) return needs
+    const machines = selfServiceMachineCount(item) * item.qty
     if (item.serviceCode === 'SELF-CUCI' || item.serviceCode === 'SELF-KERING') needs.regular += machines
     if (item.serviceCode === 'SELF-CUCI-KERING') needs.regular += machines * 2
     if (item.serviceCode === 'SELF-EXTRA-DRY') needs.extraDry += machines
@@ -95,6 +104,21 @@ export default function App({ user, onLogout }) {
   const deliveryFee = Number(checkoutDetails.deliveryFee || 0)
   const discountAmount = Number(checkoutDetails.discountAmount || 0)
   const total = Math.max(0, subtotal + (Number.isFinite(deliveryFee) ? deliveryFee : 0) - (Number.isFinite(discountAmount) ? discountAmount : 0))
+  const selfServiceWeightsValid = cart.filter(isSelfServiceItem).every(item => {
+    const weight = Number(item.weightKg)
+    return Number.isFinite(weight) && weight > 0 && weight <= 9999.99
+  })
+  const needsTransactionWeight = cart.some(item => item.serviceId && !isSelfServiceItem(item))
+  const transactionWeightValid = !needsTransactionWeight || (
+    Number.isFinite(Number(checkoutDetails.weightKg)) &&
+    Number(checkoutDetails.weightKg) > 0 &&
+    Number(checkoutDetails.weightKg) <= 9999.99
+  )
+  const checkoutWeightsValid = selfServiceWeightsValid && transactionWeightValid
+  const totalWeightKg = cart.some(isSelfServiceItem)
+    ? selfServiceWeightsValid ? cart.filter(isSelfServiceItem).reduce((sum, item) => sum + Number(item.weightKg), 0) : null
+    : needsTransactionWeight && transactionWeightValid ? Number(checkoutDetails.weightKg) : null
+  const formatWeight = weight => `${Number(weight).toLocaleString('id-ID', { maximumFractionDigits: 2 })} kg`
   const jakartaHour = Number(new Intl.DateTimeFormat('en-US', { hour: '2-digit', hour12: false, timeZone: 'Asia/Jakarta' }).format(now))
   const nightPricing = jakartaHour >= 23 || jakartaHour < 6
   const categoryServices = category === 'Produk & Minuman'
@@ -108,23 +132,46 @@ export default function App({ user, onLogout }) {
     })
   const filteredServices = categoryServices.filter(s => s.name.toLowerCase().includes(query.toLowerCase()))
   const addItem = (service) => {
-    const currentServiceCategory = cart.find(item => item.serviceId)?.serviceCategory
-    if (service.serviceId && currentServiceCategory && service.serviceCategory !== currentServiceCategory) {
-      notify('Selesaikan satu jenis layanan utama sebelum menambahkan kategori cucian lain.')
-      return
+    if (service.serviceId) {
+      const currentServices = cart.filter(item => item.serviceId)
+      const categories = new Set([...currentServices.map(item => item.serviceCategory), service.serviceCategory])
+      const hasDropOffCategory = categories.has('Drop Off') || categories.has('Setrika Saja')
+      if (categories.has('Self Service') && categories.size > 1) {
+        notify('Self Service tidak dapat dicampur dengan Drop Off atau layanan lain.')
+        return
+      }
+      if (categories.size > 1 && !(categories.size === 2 && categories.has('Drop Off') && categories.has('Setrika Saja'))) {
+        notify('Pisahkan jenis layanan utama yang berbeda ke transaksi terpisah.')
+        return
+      }
+      if (hasDropOffCategory) {
+        const codes = [...new Set([...currentServices.map(item => item.serviceCode), service.serviceCode])].sort()
+        const allowed = [
+          ['DROP-CUCI-KERING'], ['DROP-KERING'], ['DROP-LIPAT'], ['SET-REG'], ['SET-EXP'],
+          ['DROP-KERING', 'DROP-LIPAT'], ['DROP-KERING', 'SET-REG'], ['DROP-KERING', 'SET-EXP'],
+        ].some(values => values.sort().join('|') === codes.join('|'))
+        if (!allowed) {
+          notify('Kombinasi Drop Off tidak valid. Kering + Lipat dan Kering + Setrika dapat dipilih bersama.')
+          return
+        }
+      }
     }
-    const primaryCodes = ['SELF-CUCI', 'SELF-KERING', 'SELF-CUCI-KERING']
-    if (primaryCodes.includes(service.serviceCode) && cart.some(item => primaryCodes.includes(item.serviceCode) && item.serviceCode !== service.serviceCode)) {
-      notify('Pilih satu layanan utama untuk kelompok cucian ini.')
-      return
+    if (service.serviceCategory === 'Self Service') {
+      setCart(current => [...current, { ...service, cartKey: crypto.randomUUID(), qty: 1, weightKg: '' }])
+    } else {
+      setCart(current => {
+        const found = current.find(i => i.id === service.id)
+        if (service.unit === '7kg' && found) return current
+        return found
+          ? current.map(i => i.id === service.id ? { ...i, qty: i.qty + 1 } : i)
+          : [...current, { ...service, cartKey: service.id, qty: 1 }]
+      })
     }
-    setCart(current => {
-      const found = current.find(i => i.id === service.id)
-      return found ? current.map(i => i.id === service.id ? { ...i, qty: i.qty + 1 } : i) : [...current, { ...service, qty: 1 }]
-    })
     notify(`${service.name} ditambahkan`)
   }
-  const changeQty = (id, delta) => setCart(current => current.map(i => i.id === id ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0))
+  const changeQty = (cartKey, delta) => setCart(current => current.map(i => i.cartKey === cartKey ? { ...i, qty: i.qty + delta } : i).filter(i => i.qty > 0))
+  const changeLineWeight = (cartKey, weightKg) => setCart(current => current.map(i => i.cartKey === cartKey ? { ...i, weightKg } : i))
+  const removeLine = cartKey => setCart(current => current.filter(i => i.cartKey !== cartKey))
   const selectNav = (name) => { setActive(name); setMobileMenu(false) }
   const paid = async (paymentMethod = method === 'QRIS' ? 'qris' : 'tunai') => {
     const payload = {
@@ -132,11 +179,17 @@ export default function App({ user, onLogout }) {
       cash_received: paymentMethod === 'tunai' ? Number(cash || 0) : 0,
       customer_name: checkoutDetails.customerName.trim(),
       customer_phone: checkoutDetails.customerPhone.trim(),
+      membership_member_id: selectedMember?.id || null,
       weight_kg: checkoutDetails.weightKg === '' ? null : Number(checkoutDetails.weightKg),
       notes: checkoutDetails.notes.trim(),
       delivery_fee: deliveryFee,
       discount_amount: discountAmount,
-      items: cart.map(item => ({ service_id: item.serviceId, product_id: item.productId, quantity: item.qty })),
+      items: cart.map(item => ({
+        service_id: item.serviceId,
+        product_id: item.productId,
+        quantity: item.qty,
+        ...(isSelfServiceItem(item) ? { weight_kg: Number(item.weightKg) } : {}),
+      })),
     }
     const fingerprint = JSON.stringify(payload)
     if (requestRef.current?.fingerprint !== fingerprint) {
@@ -151,12 +204,56 @@ export default function App({ user, onLogout }) {
         body: JSON.stringify(payload),
       })
       const transaction = result.transaction
+      const receiptItems = cart.map(item => {
+        const quantity = lineQuantity(item)
+        const machines = selfServiceMachineCount(item)
+        const machineText = item.serviceCode === 'SELF-CUCI'
+          ? `${machines} washer`
+          : item.serviceCode === 'SELF-KERING'
+            ? `${machines} dryer`
+            : item.serviceCode === 'SELF-CUCI-KERING'
+              ? `${machines} washer + ${machines} dryer`
+              : `${machines} mesin`
+        return {
+          name: item.name,
+          quantity,
+          unit: item.unit,
+          weightKg: isSelfServiceItem(item) ? Number(item.weightKg) : null,
+          detail: isSelfServiceItem(item) ? `${formatWeight(item.weightKg)} · ${machineText}` : `${quantity} ${item.unit}`,
+          subtotal: item.price * quantity,
+        }
+      })
+      const receiptWeight = cart.some(isSelfServiceItem)
+        ? cart.filter(isSelfServiceItem).reduce((sum, item) => sum + Number(item.weightKg), 0)
+        : needsTransactionWeight ? Number(checkoutDetails.weightKg) : null
       setPayment(false)
       setCart([])
       setCash('')
       setCheckoutDetails({ customerName: '', customerPhone: '', weightKg: '', notes: '', deliveryFee: '0', discountAmount: '0' })
       requestRef.current = null
-      setSuccess({ number: transaction.transaction_number, paymentStatus: transaction.payment_status })
+      setSuccess({
+        number: transaction.transaction_number,
+        paymentStatus: transaction.payment_status,
+        membershipStamp: result.membership_stamp,
+        receipt: {
+          createdAt: transaction.created_at,
+          cashierName: user?.name || 'Kasir',
+          customerName: selectedMember?.name || checkoutDetails.customerName.trim() || 'Pelanggan umum',
+          customerPhone: selectedMember?.phone || checkoutDetails.customerPhone.trim(),
+          memberNumber: selectedMember?.member_number || '',
+          items: receiptItems,
+          totalWeightKg: receiptWeight,
+          subtotal,
+          deliveryFee,
+          discountAmount,
+          total: Number(transaction.total),
+          paymentMethod: transaction.payment_method,
+          paymentStatus: transaction.payment_status,
+          cashReceived: paymentMethod === 'tunai' ? Number(cash || 0) : 0,
+          change: Number(result.change || 0),
+        },
+      })
+      setSelectedMember(null)
     } catch (error) {
       setCheckoutError(error.message)
     } finally {
@@ -210,14 +307,14 @@ export default function App({ user, onLogout }) {
             <div className="service-toolbar"><div className="service-caption"><b>{category}</b><span>{filteredServices.length} pilihan aktif</span></div><label className="search-box"><Search size={16}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Cari layanan..." /></label></div>
             {catalogError && <div className="checkout-error" role="alert">Katalog belum dapat dimuat: {catalogError}</div>}
             <div className="service-grid">{filteredServices.map(s => <button className="service-card" key={s.id} disabled={s.unavailable} onClick={() => addItem(s)}><div className={`service-icon ${s.color || 'blue'}`}><Icon icon={s.icon || Package} size={20}/>{!s.unavailable && <span className="service-add"><Plus size={13}/></span>}</div><b className="service-name">{s.name}</b><span className="service-note">{s.note || `Layanan per ${s.unit}`}</span><div className="service-price">{s.unavailable ? 'Stok habis' : money(s.price)}{!s.unavailable && <small>/{s.unit}</small>}</div></button>)}{!filteredServices.length && <div className="empty-search">{catalogError ? 'Katalog tidak tersedia.' : 'Tidak ada layanan aktif pada kategori ini.'}</div>}</div>
-            {category === 'Self Service' && <div className="coin-note"><div className="coin-stack"><Coins size={17}/></div><span><b>Sistem koin praktis</b><small>1 koin reguler per mesin; Cuci + Kering memakai 2 koin reguler per pasangan mesin. Extra Dry memakai 1 koin khusus per pengering.</small>{Number(checkoutDetails.weightKg) > 0 && <small>Kebutuhan: {coinEstimate.regular} koin reguler + {coinEstimate.extraDry} koin Extra Dry.</small>}</span><button onClick={() => selectNav('Manajemen Koin')}>Info koin <ArrowRight size={13}/></button></div>}
+            {category === 'Self Service' && <div className="coin-note"><div className="coin-stack"><Coins size={17}/></div><span><b>Sistem koin praktis</b><small>1 koin reguler per mesin; Cuci + Kering memakai 2 koin reguler per pasangan mesin. Extra Dry memakai 1 koin khusus per pengering.</small>{cart.some(isSelfServiceItem) && <small>Estimasi keranjang: {coinEstimate.regular} koin reguler + {coinEstimate.extraDry} koin Extra Dry.</small>}</span><button onClick={() => selectNav('Manajemen Koin')}>Info koin <ArrowRight size={13}/></button></div>}
           </section>
           </>}
         </section>
 
         {!['Pesanan Laundry', 'Riwayat Transaksi', 'Produk & Stok', 'Manajemen Koin', 'Laporan', 'Pengeluaran', 'Pengaturan', 'Bantuan', 'Dashboard'].includes(active) && <aside className={`cart-panel ${cartOpen ? 'cart-open' : ''}`}><div className="cart-header"><div><div className="cart-title"><h3>Keranjang</h3><span className="cart-count">{cart.reduce((n, i) => n + i.qty, 0)}</span></div><p>Transaksi baru · Nomor dibuat saat tersimpan</p></div><button className="icon-button cart-close" onClick={() => setCartOpen(false)} aria-label="Tutup keranjang"><X size={18}/></button><button className="clear-button" onClick={() => setCart([])} disabled={!cart.length}><Trash2 size={14}/> Kosongkan</button></div>
           <div className="cart-customer"><div className="customer-icon"><UserRound size={16}/></div><div><b>{checkoutDetails.customerName || 'Pelanggan umum'}</b><small>{checkoutDetails.customerPhone || 'Data pelanggan diisi saat checkout'}</small></div><button className="edit-customer" onClick={() => { setCheckoutError(''); setPayment(true) }}>Ubah</button></div>
-          <div className="cart-items">{cart.length === 0 ? <div className="cart-empty"><div className="empty-illustration"><ShoppingCart size={27}/><span><Plus size={12}/></span></div><b>Keranjang masih kosong</b><p>Pilih layanan atau produk untuk memulai transaksi.</p></div> : cart.map(item => { const quantity = lineQuantity(item); return <div className="cart-line" key={item.id}><div className={`line-icon ${item.color}`}><Icon icon={item.icon} size={17}/></div><div className="line-details"><b>{item.name}</b><small>{money(item.price)} / {item.unit}</small><div className="qty-control"><button onClick={() => changeQty(item.id, -1)} aria-label={`Kurangi ${item.name}`}>−</button><span>{item.unit === 'kg' ? `${quantity} kg` : quantity}</span><button onClick={() => changeQty(item.id, 1)} aria-label={`Tambah ${item.name}`}>+</button></div></div><b className="line-total">{money(item.price * quantity)}</b></div> })}</div>
+          <div className="cart-items">{cart.length === 0 ? <div className="cart-empty"><div className="empty-illustration"><ShoppingCart size={27}/><span><Plus size={12}/></span></div><b>Keranjang masih kosong</b><p>Pilih layanan atau produk untuk memulai transaksi.</p></div> : cart.map(item => { const quantity = lineQuantity(item); const machineLabel = item.serviceCode === 'SELF-CUCI' ? `${quantity} washer` : item.serviceCode === 'SELF-KERING' ? `${quantity} dryer` : item.serviceCode === 'SELF-CUCI-KERING' ? `${quantity} washer + ${quantity} dryer` : `${quantity} mesin`; return <div className="cart-line" key={item.cartKey}><div className={`line-icon ${item.color}`}><Icon icon={item.icon} size={17}/></div><div className="line-details"><b>{item.name}</b><small>{money(item.price)} / {item.unit}</small>{isSelfServiceItem(item) ? <><small>{item.weightKg ? `${formatWeight(item.weightKg)} · ${machineLabel}` : 'Berat dan mesin diisi pada Detail & pembayaran'}</small></> : item.unit === '7kg' ? <small>{quantity} × tarif per 7 kg</small> : <div className="qty-control"><button onClick={() => changeQty(item.cartKey, -1)} aria-label={`Kurangi ${item.name}`}>−</button><span>{item.unit === 'kg' ? `${quantity} kg` : quantity}</span><button onClick={() => changeQty(item.cartKey, 1)} aria-label={`Tambah ${item.name}`}>+</button></div>}</div><b className="line-total">{money(item.price * quantity)}</b><button type="button" className="cart-line-remove" onClick={() => removeLine(item.cartKey)} aria-label={`Hapus ${item.name} dari keranjang`}><X size={15}/></button></div> })}</div>
           {cart.length > 0 && <div className="cart-extras"><button onClick={() => setPayment(true)}><Plus size={14}/> Catatan & pelanggan</button><button onClick={() => setPayment(true)}><Plus size={14}/> Ongkir & diskon</button></div>}
           <div className="cart-footer"><div className="subtotal-row"><span>Subtotal</span><b>{money(subtotal)}</b></div>{deliveryFee > 0 && <div className="subtotal-row"><span>Ongkir</span><b>{money(deliveryFee)}</b></div>}<div className="subtotal-row muted-row"><span>Diskon</span><button onClick={() => setPayment(true)}>{discountAmount > 0 ? `− ${money(discountAmount)}` : '+ Tambahkan'}</button></div><div className="total-row"><span>Total tagihan</span><b>{money(total)}</b></div><button className="btn btn-secondary save-order" disabled={!cart.length} onClick={() => { setCheckoutError(''); setPayment(true) }}><ShoppingBag size={17}/> Simpan belum dibayar</button><button className="btn btn-primary pay-button" disabled={!cart.length} onClick={() => { setCheckoutError(''); setPayment(true) }}>Bayar sekarang <ArrowRight size={17}/></button><div className="secure-note"><Check size={13}/> Data transaksi tersimpan setelah konfirmasi.</div></div>
         </aside>}
@@ -229,13 +326,24 @@ export default function App({ user, onLogout }) {
     {!['Pesanan Laundry', 'Riwayat Transaksi', 'Produk & Stok', 'Manajemen Koin', 'Laporan', 'Pengeluaran', 'Pengaturan', 'Bantuan', 'Dashboard'].includes(active) && <button className="mobile-cart-fab" onClick={() => setCartOpen(true)}><ShoppingCart size={19}/><span>Lihat keranjang</span><b>{money(total)}</b><span className="fab-count">{cart.reduce((n, i) => n + i.qty, 0)}</span></button>}
     {cartOpen && <button className="scrim cart-scrim" onClick={() => setCartOpen(false)} aria-label="Tutup keranjang"/>}
     {toast && <div className="toast"><span className="toast-check"><Check size={14}/></span>{toast}</div>}
-    {payment && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && !submitting && setPayment(false)}><section className="payment-modal" aria-labelledby="checkout-title"><div className="modal-header"><div><div className="section-overline">KONFIRMASI TRANSAKSI</div><h2 id="checkout-title">Detail & pembayaran</h2><p>Periksa rincian. Harga dan total akan divalidasi kembali oleh server.</p></div><button className="icon-button" onClick={() => setPayment(false)} disabled={submitting} aria-label="Tutup"><X size={19}/></button></div><div className="payment-total"><small>Total tagihan</small><b>{money(total)}</b><span>Nomor transaksi dibuat setelah tersimpan</span></div>
+    {payment && <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && !submitting && setPayment(false)}><section className="payment-modal" aria-labelledby="checkout-title"><div className="modal-header"><div><div className="section-overline">KONFIRMASI TRANSAKSI</div><h2 id="checkout-title">Detail & pembayaran</h2><p>Periksa rincian. Harga dan total akan divalidasi kembali oleh server.</p></div><button className="icon-button" onClick={() => setPayment(false)} disabled={submitting} aria-label="Tutup"><X size={19}/></button></div><div className="payment-total"><small>Total tagihan</small><b>{money(total)}</b>{totalWeightKg !== null && <span className="payment-total-weight">Total berat <strong>{formatWeight(totalWeightKg)}</strong></span>}<span>Nomor transaksi dibuat setelah tersimpan</span></div>
       <div className="checkout-landscape-grid">
-      <div className="checkout-info-column"><div className="checkout-details">
+      <div className="checkout-info-column"><MembershipPicker selectedMember={selectedMember} onSelect={setSelectedMember} notify={notify}/><div className="checkout-details">
+        {!selectedMember && <>
         <label>Nama pelanggan (opsional)<input maxLength="100" value={checkoutDetails.customerName} onChange={e => setCheckoutDetails({ ...checkoutDetails, customerName: e.target.value })} placeholder="Nama pelanggan"/></label>
         <label>Nomor telepon (opsional)<input maxLength="30" value={checkoutDetails.customerPhone} onChange={e => setCheckoutDetails({ ...checkoutDetails, customerPhone: e.target.value })} placeholder="08xx xxxx xxxx"/></label>
-        {cart.some(item => item.serviceId) && <label>Berat laundry (kg)<input type="number" min="0.01" max="9999.99" step="0.01" required value={checkoutDetails.weightKg} onChange={e => setCheckoutDetails({ ...checkoutDetails, weightKg: e.target.value })} placeholder="Masukkan berat aktual"/></label>}
-        {cart.some(item => ['SELF-CUCI', 'SELF-KERING', 'SELF-CUCI-KERING', 'SELF-EXTRA-DRY'].includes(item.serviceCode)) && Number(checkoutDetails.weightKg) > 0 && <p className="machine-count-note">Berdasarkan kapasitas 7 kg, estimasi <b>{selfServiceMachineCount} mesin</b> untuk layanan terpilih; tarif siklus dan kebutuhan koin mengikuti jumlah mesin.</p>}
+        </>}
+        {cart.some(item => item.serviceId && !isSelfServiceItem(item)) && <label>Berat laundry (kg)<input type="number" min="0.01" max="9999.99" step="0.01" required value={checkoutDetails.weightKg} onChange={e => setCheckoutDetails({ ...checkoutDetails, weightKg: e.target.value })} placeholder="Masukkan berat aktual"/></label>}
+        {cart.filter(isSelfServiceItem).map(item => {
+          const machines = selfServiceMachineCount(item)
+          const machineLabel = item.serviceCode === 'SELF-CUCI' ? `${machines} washer` : item.serviceCode === 'SELF-KERING' ? `${machines} dryer` : item.serviceCode === 'SELF-CUCI-KERING' ? `${machines} washer + ${machines} dryer` : `${machines} mesin`
+          return <div className="checkout-self-service-weight" key={item.cartKey}>
+            <label htmlFor={`checkout-weight-${item.cartKey}`}>Berat {item.name} (kg)</label>
+            <input id={`checkout-weight-${item.cartKey}`} type="number" min="0.01" max="9999.99" step="0.01" required value={item.weightKg} onChange={event => changeLineWeight(item.cartKey, event.target.value)} placeholder="Masukkan berat aktual"/>
+            <small>{machines ? `${machineLabel} · kapasitas 7 kg per mesin` : 'Jumlah mesin dihitung setelah berat diisi'}</small>
+          </div>
+        })}
+        {cart.some(isSelfServiceItem) && <p className="machine-count-note">Berat dan jumlah mesin Self Service dihitung terpisah untuk setiap baris layanan.</p>}
         <label className="checkout-notes">Catatan<textarea maxLength="2000" rows="2" value={checkoutDetails.notes} onChange={e => setCheckoutDetails({ ...checkoutDetails, notes: e.target.value })} placeholder="Catatan pesanan (opsional)"/></label>
         <label>Ongkir<input type="number" min="0" step="0.01" value={checkoutDetails.deliveryFee} onChange={e => setCheckoutDetails({ ...checkoutDetails, deliveryFee: e.target.value })}/></label>
         <label>Diskon nominal<input type="number" min="0" step="0.01" value={checkoutDetails.discountAmount} onChange={e => setCheckoutDetails({ ...checkoutDetails, discountAmount: e.target.value })}/></label>
@@ -243,9 +351,10 @@ export default function App({ user, onLogout }) {
       </div>
       <div className="checkout-payment-column"><div className="method-label">Metode pembayaran</div><div className="payment-methods"><button className={`method-card ${method === 'Tunai' ? 'chosen' : ''}`} onClick={() => setMethod('Tunai')} disabled={submitting}><div className="method-icon cash"><Wallet size={19}/></div><span><b>Tunai</b><small>Bayar langsung</small></span><span className="radio-dot"/></button><button className={`method-card ${method === 'QRIS' ? 'chosen' : ''}`} onClick={() => setMethod('QRIS')} disabled={submitting}><div className="method-icon qris"><CreditCard size={19}/></div><span><b>QRIS</b><small>Belum diverifikasi</small></span><span className="radio-dot"/></button></div>
       {method === 'Tunai' ? <div className="cash-section"><label>Uang diterima<input value={cash} onChange={e => setCash(e.target.value)} placeholder="Masukkan nominal" inputMode="numeric" /></label><div className="quick-cash">{[total, 50000, 100000].filter((v, i, a) => v > 0 && a.indexOf(v) === i).map(n => <button key={n} onClick={() => setCash(String(n))}>{n === total ? 'Uang pas' : money(n)}</button>)}</div><div className="change-row"><span>Kembalian</span><b>{money(Math.max(0, Number(cash || 0) - total))}</b></div></div> : <div className="qris-box"><CreditCard size={21}/><span><b>QRIS belum terverifikasi</b><small>Transaksi akan tersimpan dengan status belum dibayar. Jangan serahkan barang sebagai lunas sebelum pembayaran diverifikasi.</small></span></div>}
+      {!checkoutWeightsValid && <div className="checkout-error" role="alert">Isi berat yang valid untuk setiap baris layanan sebelum menyimpan transaksi.</div>}
       {checkoutError && <div className="checkout-error" role="alert">{checkoutError}</div>}
-      <button className="btn btn-primary confirm-payment" onClick={() => paid()} disabled={submitting || (method === 'Tunai' && Number(cash || 0) < total)}><Check size={17}/>{submitting ? 'Menyimpan transaksi…' : method === 'Tunai' ? 'Konfirmasi pembayaran tunai' : 'Simpan QRIS belum terverifikasi'}</button>
-      <button className="btn btn-secondary confirm-payment" onClick={() => paid(null)} disabled={submitting}>{submitting ? 'Menyimpan transaksi…' : 'Simpan sebagai belum dibayar'}</button>
+      <button className="btn btn-primary confirm-payment" onClick={() => paid()} disabled={submitting || !checkoutWeightsValid || (method === 'Tunai' && Number(cash || 0) < total)}><Check size={17}/>{submitting ? 'Menyimpan transaksi…' : method === 'Tunai' ? 'Konfirmasi pembayaran tunai' : 'Simpan QRIS belum terverifikasi'}</button>
+      <button className="btn btn-secondary confirm-payment" onClick={() => paid(null)} disabled={submitting || !checkoutWeightsValid}>{submitting ? 'Menyimpan transaksi…' : 'Simpan sebagai belum dibayar'}</button>
       <div className="modal-secure"><Check size={13}/> Keranjang hanya dikosongkan setelah transaksi berhasil disimpan.</div>
       </div>
       </div>
@@ -257,8 +366,51 @@ export default function App({ user, onLogout }) {
       onCancel={() => setShiftCloseConfirm(null)}
       onConfirm={closeShift}
     />}
-    {success && <div className="modal-backdrop"><section className="payment-modal transaction-success" role="dialog" aria-modal="true" aria-labelledby="transaction-success-title"><div className="success-icon"><Check size={24}/></div><h2 id="transaction-success-title">Transaksi berhasil disimpan</h2><p>Nomor transaksi <b>{success.number}</b></p><p>Status pembayaran: <b>{success.paymentStatus === 'lunas' ? 'Lunas' : 'Belum dibayar'}</b></p><div className="success-actions"><button className="btn btn-primary" onClick={() => { setSuccess(null); selectNav('Riwayat Transaksi') }}>Lihat riwayat transaksi</button><button className="btn btn-secondary" onClick={() => setSuccess(null)}>Selesai</button></div></section></div>}
+    {success && <div className="modal-backdrop"><section className="payment-modal transaction-success" role="dialog" aria-modal="true" aria-labelledby="transaction-success-title"><div className="success-icon"><Check size={24}/></div><h2 id="transaction-success-title">Transaksi berhasil disimpan</h2><p>Nomor transaksi <b>{success.number}</b></p><p>Status pembayaran: <b>{success.paymentStatus === 'lunas' ? 'Lunas' : 'Belum dibayar'}</b></p>{success.membershipStamp?.message && <p className="membership-success-note">{success.membershipStamp.message}</p>}<div className="success-actions"><button className="btn btn-secondary" onClick={() => window.print()}><Printer size={16}/> Cetak struk pembayaran</button><button className="btn btn-primary" onClick={() => { setSuccess(null); selectNav('Riwayat Transaksi') }}>Lihat riwayat transaksi</button><button className="btn btn-secondary" onClick={() => setSuccess(null)}>Selesai</button></div><ReceiptPrint receipt={success.receipt} transactionNumber={success.number}/></section></div>}
   </div>
+}
+
+function ReceiptPrint({ receipt, transactionNumber }) {
+  const printedAt = receipt.createdAt
+    ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(receipt.createdAt))
+    : 'Waktu transaksi tidak tersedia'
+  const paymentMethod = receipt.paymentMethod === 'tunai' ? 'Tunai' : receipt.paymentMethod === 'qris' ? 'QRIS' : 'Belum dibayar'
+
+  return <article className="receipt-print" aria-label="Struk pembayaran">
+    <header className="receipt-print-header">
+      <b>KINO LAUNDRY</b>
+      <span>STRUK PEMBAYARAN</span>
+    </header>
+    <div className="receipt-print-meta">
+      <div><span>No. transaksi</span><b>{transactionNumber}</b></div>
+      <div><span>Tanggal</span><b>{printedAt}</b></div>
+      <div><span>Kasir</span><b>{receipt.cashierName}</b></div>
+      <div><span>Pelanggan</span><b>{receipt.customerName}</b></div>
+      {receipt.customerPhone && <div><span>Telepon</span><b>{receipt.customerPhone}</b></div>}
+      {receipt.memberNumber && <div><span>Member</span><b>{receipt.memberNumber}</b></div>}
+    </div>
+    <div className="receipt-print-items">
+      {receipt.items.map((item, index) => <div className="receipt-print-item" key={`${item.name}-${index}`}>
+        <b>{item.name}</b>
+        <span>{item.detail}</span>
+        <strong>{money(item.subtotal)}</strong>
+      </div>)}
+    </div>
+    <div className="receipt-print-summary">
+      {receipt.totalWeightKg !== null && <div><span>Total berat</span><b>{Number(receipt.totalWeightKg).toLocaleString('id-ID', { maximumFractionDigits: 2 })} kg</b></div>}
+      <div><span>Subtotal</span><b>{money(receipt.subtotal)}</b></div>
+      {receipt.deliveryFee > 0 && <div><span>Ongkir</span><b>{money(receipt.deliveryFee)}</b></div>}
+      {receipt.discountAmount > 0 && <div><span>Diskon</span><b>− {money(receipt.discountAmount)}</b></div>}
+      <div className="receipt-print-total"><span>Total</span><b>{money(receipt.total)}</b></div>
+      <div><span>Metode</span><b>{paymentMethod}</b></div>
+      <div><span>Status</span><b>{receipt.paymentStatus === 'lunas' ? 'Lunas' : 'Belum dibayar'}</b></div>
+      {receipt.paymentStatus === 'lunas' && receipt.paymentMethod === 'tunai' && <>
+        <div><span>Uang diterima</span><b>{money(receipt.cashReceived)}</b></div>
+        <div><span>Kembalian</span><b>{money(receipt.change)}</b></div>
+      </>}
+    </div>
+    <footer>Terima kasih telah menggunakan layanan KINO Laundry.</footer>
+  </article>
 }
 
 function ShiftCloseConfirmation({ shift, closing, error, onCancel, onConfirm }) {

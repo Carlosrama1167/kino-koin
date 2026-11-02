@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__) . '/bootstrap.php';
+require dirname(__DIR__) . '/membership_rules.php';
 $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
 session_name(getenv('APP_SESSION_NAME') ?: 'kino_pos_session');
 session_set_cookie_params(['httponly'=>true,'secure'=>$secure,'samesite'=>'Lax','path'=>'/']);
@@ -88,6 +89,54 @@ $attendanceSafeguardsReady = static function (PDO $pdo): bool {
         && ($shift===true||$shift==='t'||$shift===1||$shift==='1')
         && ($outlet===true||$outlet==='t'||$outlet===1||$outlet==='1');
 };
+$membershipToday = static fn(): string => (new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('Y-m-d');
+$membershipRowBase = "SELECT m.id,m.member_number,m.status,m.verification_status,m.created_at,
+    c.id AS customer_id,c.name,c.phone,mt.code AS membership_type_code,mt.name AS membership_type,
+    mt.card_color,mt.requires_verification,ac.id AS card_id,ac.card_number,ac.stamp_slots,
+    COALESCE(ac.stamp_count,0) AS stamp_count,
+    (ac.id IS NOT NULL AND ac.stamp_count>=ac.stamp_slots) AS card_full,
+    EXISTS(SELECT 1 FROM membership_stamps ms WHERE ms.member_id=m.id AND ms.operating_date=?::date) AS stamped_today
+    FROM membership_members m
+    JOIN customers c ON c.id=m.customer_id
+    JOIN membership_types mt ON mt.id=m.membership_type_id
+    LEFT JOIN LATERAL (
+      SELECT mc.id,mc.card_number,mc.stamp_slots,
+        (SELECT COUNT(*) FROM membership_stamps ms WHERE ms.card_id=mc.id) AS stamp_count
+      FROM membership_cards mc WHERE mc.member_id=m.id AND mc.status='aktif'
+      ORDER BY mc.id DESC LIMIT 1
+    ) ac ON TRUE";
+$dbBoolean = static fn($value): bool => in_array($value,[true,'t','true',1,'1'],true);
+$membershipNormalize = static function (array $row): array {
+    foreach (['card_full','stamped_today','requires_verification'] as $field) {
+        if (array_key_exists($field,$row)) $row[$field]=in_array($row[$field],[true,'t',1,'1'],true);
+    }
+    return $row;
+};
+$membershipRead = static function (PDO $pdo,int $memberId,string $today) use ($membershipRowBase,$membershipNormalize): ?array {
+    $q=$pdo->prepare($membershipRowBase.' WHERE m.id=? LIMIT 1');
+    $q->execute([$today,$memberId]);
+    $row=$q->fetch();
+    return $row?$membershipNormalize($row):null;
+};
+$issueMembershipCard = static function (PDO $pdo,int $memberId,int $slots,int $userId): array {
+    $suffix=strtoupper(bin2hex(random_bytes(8)));
+    $number='KINO-K-'.(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('ymd').'-'.$suffix;
+    $q=$pdo->prepare("INSERT INTO membership_cards(card_number,member_id,stamp_slots,issued_by) VALUES(?,?,?,?) RETURNING id,card_number,stamp_slots,status,issued_at");
+    $q->execute([$number,$memberId,$slots,$userId]);
+    return $q->fetch();
+};
+$membershipSchemaReady = static function (PDO $pdo): bool {
+    $ready=$pdo->query("SELECT to_regclass('public.membership_types') IS NOT NULL
+      AND to_regclass('public.membership_members') IS NOT NULL
+      AND to_regclass('public.membership_cards') IS NOT NULL
+      AND to_regclass('public.membership_stamps') IS NOT NULL
+      AND to_regclass('public.membership_raffle_coupons') IS NOT NULL
+      AND to_regclass('public.membership_card_redemptions') IS NOT NULL")->fetchColumn();
+    return in_array($ready,[true,'t',1,'1'],true);
+};
+$requireMembershipSchema = static function (PDO $pdo) use ($membershipSchemaReady): void {
+    if (!$membershipSchemaReady($pdo)) json_out(['error'=>'Migration membership belum diterapkan pada database.'],503);
+};
 try {
     if ($method === 'GET' && $path === '/api/auth/csrf') {
         $_SESSION['csrf'] ??= bin2hex(random_bytes(32)); json_out(['csrf'=>$_SESSION['csrf']]);
@@ -108,6 +157,226 @@ try {
     }
     if ($method === 'GET' && $path === '/api/products') {
         require_user('kasir'); $q=db()->query('SELECT id,name,category,price,stock,minimum_stock,unit FROM products WHERE is_active ORDER BY name'); json_out(['items'=>$q->fetchAll()]);
+    }
+    if ($method === 'GET' && $path === '/api/membership/types') {
+        $u=require_user(); if (!in_array($u['role'],['owner','kasir'],true)) json_out(['error'=>'Anda tidak memiliki akses ke membership.'],403);
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $q=$pdo->query('SELECT code,name,card_color,stamp_slots,requires_verification FROM membership_types WHERE is_active ORDER BY id');
+        json_out(['items'=>array_map($membershipNormalize,$q->fetchAll())]);
+    }
+    if ($method === 'GET' && $path === '/api/membership/members') {
+        $u=require_user(); if (!in_array($u['role'],['owner','kasir'],true)) json_out(['error'=>'Anda tidak memiliki akses ke membership.'],403);
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $search=trim((string)($_GET['search']??''));
+        $searchLength=preg_match_all('/./us',$search);
+        if ($searchLength===false || $searchLength>100) json_out(['error'=>'Pencarian member terlalu panjang.'],422);
+        if ($u['role']==='kasir' && $searchLength<2) json_out(['items'=>[]]);
+        $where=[];
+        $params=[$membershipToday()];
+        if ($u['role']==='kasir') {
+            $includePending=($_GET['include_pending']??'')==='1';
+            $where[]=$includePending
+                ? "(m.status='pending' OR (m.status='aktif' AND (mt.requires_verification=FALSE OR m.verification_status='verified')))"
+                : "m.status='aktif' AND (mt.requires_verification=FALSE OR m.verification_status='verified')";
+        }
+        if ($search!=='') {
+            $where[]='(m.member_number ILIKE ? OR c.name ILIKE ? OR c.phone ILIKE ?)';
+            $like='%'.$search.'%'; array_push($params,$like,$like,$like);
+        }
+        $sql=$membershipRowBase.($where?' WHERE '.implode(' AND ',$where):'').' ORDER BY c.name,m.id'.($u['role']==='owner'?'':' LIMIT 200');
+        $q=$pdo->prepare($sql); $q->execute($params); $items=array_map($membershipNormalize,$q->fetchAll()); json_out(['items'=>$items]);
+    }
+    if ($method === 'POST' && $path === '/api/membership/members') {
+        require_csrf(); $u=require_user();
+        if (!in_array($u['role'],['owner','kasir'],true)) json_out(['error'=>'Anda tidak memiliki akses untuk mendaftarkan member.'],403);
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $i=body(); $name=trim((string)($i['name']??'')); $phone=trim((string)($i['phone']??''));
+        $typeCode=(string)($i['membership_type']??''); $verified=($i['student_verified']??false)===true;
+        $idempotencyKey=trim((string)($_SERVER['HTTP_IDEMPOTENCY_KEY']??''));
+        $nameLength=preg_match_all('/./us',$name); $phoneLength=preg_match_all('/./us',$phone);
+        if ($name==='' || $nameLength===false || $nameLength>100 || $phone==='' || $phoneLength===false || $phoneLength>30) json_out(['error'=>'Nama dan nomor telepon wajib diisi dengan panjang yang valid.'],422);
+        if (!in_array($typeCode,['REGULAR','STUDENT'],true)) json_out(['error'=>'Jenis membership tidak valid.'],422);
+        if ($idempotencyKey==='' || strlen($idempotencyKey)>100 || !preg_match('/^[A-Za-z0-9._:-]+$/',$idempotencyKey)) json_out(['error'=>'Kunci pendaftaran tidak valid. Silakan coba kembali.'],422);
+        $requestHash=hash('sha256',json_encode($i,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
+        $q=$pdo->prepare('SELECT id,request_hash FROM membership_members WHERE idempotency_key=?'); $q->execute([$idempotencyKey]); $existing=$q->fetch();
+        if ($existing) {
+            if (!hash_equals(trim((string)$existing['request_hash']),$requestHash)) json_out(['error'=>'Kunci pendaftaran sudah digunakan dengan data berbeda.'],409);
+            json_out(['member'=>$membershipRead($pdo,(int)$existing['id'],$membershipToday()),'duplicate'=>true]);
+        }
+        $q=$pdo->prepare('SELECT id,name,stamp_slots,requires_verification FROM membership_types WHERE code=? AND is_active=TRUE');
+        $q->execute([$typeCode]); $membershipType=$q->fetch();
+        if (!$membershipType) json_out(['error'=>'Jenis membership tidak aktif atau tidak tersedia.'],409);
+        $requiresVerification=$dbBoolean($membershipType['requires_verification']);
+        $isVerified=!$requiresVerification || $verified;
+        $memberStatus=$isVerified?'aktif':'pending';
+        $verificationStatus=$requiresVerification?($isVerified?'verified':'pending'):'not_required';
+        try {
+            $pdo->beginTransaction();
+            $q=$pdo->prepare('INSERT INTO customers(name,phone) VALUES(?,?) RETURNING id'); $q->execute([$name,$phone]); $customerId=(int)$q->fetchColumn();
+            $memberNumber='MEM-'.(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('ymd').'-'.strtoupper(bin2hex(random_bytes(5)));
+            $q=$pdo->prepare('INSERT INTO membership_members(member_number,customer_id,membership_type_id,status,verification_status,verified_by,verified_at,created_by,idempotency_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id');
+            $q->execute([$memberNumber,$customerId,$membershipType['id'],$memberStatus,$verificationStatus,$verificationStatus==='verified'?$u['id']:null,$verificationStatus==='verified'?date(DateTimeInterface::ATOM):null,$u['id'],$idempotencyKey,$requestHash]);
+            $memberId=(int)$q->fetchColumn();
+            $card=null;
+            if ($memberStatus==='aktif') $card=$issueMembershipCard($pdo,$memberId,(int)$membershipType['stamp_slots'],(int)$u['id']);
+            $pdo->commit();
+            json_out(['member'=>$membershipRead($pdo,$memberId,$membershipToday()),'card'=>$card,'duplicate'=>false],201);
+        } catch (PDOException $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($error->getCode()==='23505') {
+                $q=$pdo->prepare('SELECT id,request_hash FROM membership_members WHERE idempotency_key=?'); $q->execute([$idempotencyKey]); $duplicate=$q->fetch();
+                if ($duplicate) {
+                    if (!hash_equals(trim((string)$duplicate['request_hash']),$requestHash)) json_out(['error'=>'Kunci pendaftaran sudah digunakan dengan data berbeda.'],409);
+                    json_out(['member'=>$membershipRead($pdo,(int)$duplicate['id'],$membershipToday()),'duplicate'=>true]);
+                }
+            }
+            throw $error;
+        }
+    }
+    if ($method === 'POST' && preg_match('#^/api/membership/members/([0-9]+)/verify$#',$path,$matches)) {
+        require_csrf(); $u=require_user();
+        if (!in_array($u['role'],['owner','kasir'],true)) json_out(['error'=>'Anda tidak memiliki akses untuk memverifikasi member.'],403);
+        $memberId=(int)$matches[1]; $pdo=db(); $requireMembershipSchema($pdo); $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare("SELECT m.id,m.status,m.verification_status,mt.requires_verification,mt.stamp_slots FROM membership_members m JOIN membership_types mt ON mt.id=m.membership_type_id WHERE m.id=? FOR UPDATE OF m");
+            $q->execute([$memberId]); $member=$q->fetch();
+            if (!$member || !$dbBoolean($member['requires_verification'])) { $pdo->rollBack(); json_out(['error'=>'Member pelajar tidak ditemukan.'],404); }
+            if ($member['status']==='nonaktif') { $pdo->rollBack(); json_out(['error'=>'Member nonaktif tidak dapat diverifikasi.'],409); }
+            if ($member['verification_status']!=='verified') {
+                $q=$pdo->prepare("UPDATE membership_members SET status='aktif',verification_status='verified',verified_by=?,verified_at=NOW() WHERE id=?");
+                $q->execute([$u['id'],$memberId]);
+            }
+            $q=$pdo->prepare("SELECT id FROM membership_cards WHERE member_id=? AND status='aktif'"); $q->execute([$memberId]);
+            if (!$q->fetchColumn()) $issueMembershipCard($pdo,$memberId,(int)$member['stamp_slots'],(int)$u['id']);
+            $pdo->commit();
+            json_out(['member'=>$membershipRead($pdo,$memberId,$membershipToday())]);
+        } catch (Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+    }
+    if ($method === 'PATCH' && preg_match('#^/api/owner/membership/members/([0-9]+)$#',$path,$matches)) {
+        require_csrf(); require_user('owner'); $i=body();
+        $memberId=(int)$matches[1]; $name=trim((string)($i['name']??'')); $phone=trim((string)($i['phone']??''));
+        $nameLength=preg_match_all('/./us',$name); $phoneLength=preg_match_all('/./us',$phone);
+        if ($name==='' || $nameLength===false || $nameLength>100 || $phone==='' || $phoneLength===false || $phoneLength>30) json_out(['error'=>'Nama dan nomor telepon wajib diisi dengan panjang yang valid.'],422);
+        $pdo=db(); $requireMembershipSchema($pdo); $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare('SELECT customer_id FROM membership_members WHERE id=? FOR UPDATE'); $q->execute([$memberId]); $customerId=$q->fetchColumn();
+            if (!$customerId) { $pdo->rollBack(); json_out(['error'=>'Member tidak ditemukan.'],404); }
+            $q=$pdo->prepare('UPDATE customers SET name=?,phone=? WHERE id=?'); $q->execute([$name,$phone,$customerId]);
+            $pdo->commit(); json_out(['member'=>$membershipRead($pdo,$memberId,$membershipToday())]);
+        } catch (Throwable $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $error;
+        }
+    }
+    if ($method === 'PATCH' && preg_match('#^/api/owner/membership/members/([0-9]+)/status$#',$path,$matches)) {
+        require_csrf(); require_user('owner'); $i=body(); $status=$i['status']??'';
+        if (!in_array($status,['aktif','nonaktif'],true)) json_out(['error'=>'Status member tidak valid.'],422);
+        $pdo=db(); $requireMembershipSchema($pdo); $q=$pdo->prepare("SELECT m.id,m.status,m.verification_status,mt.requires_verification FROM membership_members m JOIN membership_types mt ON mt.id=m.membership_type_id WHERE m.id=?");
+        $q->execute([(int)$matches[1]]); $member=$q->fetch();
+        if (!$member) json_out(['error'=>'Member tidak ditemukan.'],404);
+        if ($status==='aktif' && $dbBoolean($member['requires_verification']) && $member['verification_status']!=='verified') json_out(['error'=>'Verifikasi member pelajar harus diselesaikan sebelum diaktifkan.'],409);
+        $q=$pdo->prepare('UPDATE membership_members SET status=? WHERE id=?'); $q->execute([$status,(int)$matches[1]]);
+        json_out(['member'=>$membershipRead($pdo,(int)$matches[1],$membershipToday())]);
+    }
+    if ($method === 'GET' && preg_match('#^/api/owner/membership/members/([0-9]+)/transactions$#',$path,$matches)) {
+        require_user('owner');
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $q=$pdo->prepare("SELECT t.id,t.transaction_number,t.total,t.payment_status,t.created_at,
+          COALESCE(json_agg(json_build_object('description',ti.description,'quantity',ti.quantity,'weight_kg',ti.weight_kg,'washer_machine_count',ti.washer_machine_count,'dryer_machine_count',ti.dryer_machine_count,'subtotal',ti.subtotal)) FILTER (WHERE ti.id IS NOT NULL),'[]'::json) AS items
+          FROM membership_members m JOIN transactions t ON t.customer_id=m.customer_id
+          LEFT JOIN transaction_items ti ON ti.transaction_id=t.id
+          WHERE m.id=? AND t.transaction_type='self_service' AND t.status='aktif'
+          GROUP BY t.id ORDER BY t.created_at DESC LIMIT 200");
+        $q->execute([(int)$matches[1]]); $items=$q->fetchAll();
+        foreach ($items as &$item) $item['items']=json_decode((string)$item['items'],true,512,JSON_THROW_ON_ERROR);
+        unset($item);
+        json_out(['items'=>$items]);
+    }
+    if ($method === 'GET' && $path === '/api/owner/membership/cards') {
+        require_user('owner');
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $q=$pdo->prepare("SELECT mc.id,mc.card_number,mc.status,mc.stamp_slots,mc.issued_at,mc.handed_over_at,
+          m.id AS member_id,m.member_number,c.name,c.phone,mt.name AS membership_type,mt.card_color,
+          COUNT(ms.id)::integer AS stamp_count,rc.ticket_number
+          FROM membership_cards mc JOIN membership_members m ON m.id=mc.member_id
+          JOIN customers c ON c.id=m.customer_id JOIN membership_types mt ON mt.id=m.membership_type_id
+          LEFT JOIN membership_stamps ms ON ms.card_id=mc.id
+          LEFT JOIN membership_raffle_coupons rc ON rc.card_id=mc.id
+          GROUP BY mc.id,m.id,c.id,mt.id,rc.id ORDER BY mc.issued_at DESC,mc.id DESC");
+        $q->execute(); json_out(['items'=>$q->fetchAll()]);
+    }
+    if ($method === 'POST' && preg_match('#^/api/membership/cards/([0-9]+)/handover$#',$path,$matches)) {
+        require_csrf(); $u=require_user();
+        if (!in_array($u['role'],['owner','kasir'],true)) json_out(['error'=>'Anda tidak memiliki akses untuk memproses penyerahan kartu.'],403);
+        $cardId=(int)$matches[1]; $idempotencyKey=trim((string)($_SERVER['HTTP_IDEMPOTENCY_KEY']??''));
+        if ($idempotencyKey==='' || strlen($idempotencyKey)>100 || !preg_match('/^[A-Za-z0-9._:-]+$/',$idempotencyKey)) json_out(['error'=>'Kunci penyerahan kartu tidak valid. Silakan coba kembali.'],422);
+        $requestHash=hash('sha256','membership-card-handover:'.$cardId); $pdo=db(); $requireMembershipSchema($pdo);
+        $loadRedemption=static function(PDO $pdo,string $key): ?array {
+            $q=$pdo->prepare('SELECT r.request_hash,rc.ticket_number,mc.card_number AS new_card_number,r.created_at AS issued_at FROM membership_card_redemptions r JOIN membership_raffle_coupons rc ON rc.id=r.coupon_id JOIN membership_cards mc ON mc.id=r.new_card_id WHERE r.idempotency_key=?');
+            $q->execute([$key]); return $q->fetch()?:null;
+        };
+        $existing=$loadRedemption($pdo,$idempotencyKey);
+        if ($existing) {
+            if (!hash_equals(trim((string)$existing['request_hash']),$requestHash)) json_out(['error'=>'Kunci penyerahan sudah digunakan untuk kartu lain.'],409);
+            unset($existing['request_hash']); json_out(['redemption'=>$existing,'duplicate'=>true]);
+        }
+        $pdo->beginTransaction();
+        try {
+            $q=$pdo->prepare("SELECT mc.member_id AS id,m.status AS member_status,m.verification_status,mt.requires_verification
+              FROM membership_cards mc JOIN membership_members m ON m.id=mc.member_id
+              JOIN membership_types mt ON mt.id=m.membership_type_id WHERE mc.id=? FOR UPDATE OF m");
+            $q->execute([$cardId]); $card=$q->fetch();
+            if (!$card) { $pdo->rollBack(); json_out(['error'=>'Kartu membership tidak ditemukan.'],404); }
+            $existing=$loadRedemption($pdo,$idempotencyKey);
+            if ($existing) {
+                $pdo->rollBack();
+                if (!hash_equals(trim((string)$existing['request_hash']),$requestHash)) json_out(['error'=>'Kunci penyerahan sudah digunakan untuk kartu lain.'],409);
+                unset($existing['request_hash']); json_out(['redemption'=>$existing,'duplicate'=>true]);
+            }
+            $memberId=(int)$card['id'];
+            $q=$pdo->prepare('SELECT id,member_id,stamp_slots,status FROM membership_cards WHERE id=? FOR UPDATE');
+            $q->execute([$cardId]); $activeCard=$q->fetch();
+            if (!$activeCard || (int)$activeCard['member_id']!==$memberId || $activeCard['status']!=='aktif' || $card['member_status']!=='aktif' || ($dbBoolean($card['requires_verification']) && $card['verification_status']!=='verified')) {
+                $pdo->rollBack(); json_out(['error'=>'Kartu tidak aktif atau member belum terverifikasi.'],409);
+            }
+            $q=$pdo->prepare('SELECT COUNT(*) FROM membership_stamps WHERE card_id=?'); $q->execute([$cardId]); $stampCount=(int)$q->fetchColumn();
+            if ($stampCount<(int)$card['stamp_slots']) { $pdo->rollBack(); json_out(['error'=>'Kartu belum penuh dan belum dapat diserahkan.'],409); }
+            $handedOverAt=(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format(DateTimeInterface::ATOM);
+            $q=$pdo->prepare("UPDATE membership_cards SET status='diserahkan',handed_over_by=?,handed_over_at=? WHERE id=?");
+            $q->execute([$u['id'],$handedOverAt,$cardId]);
+            $sequence=(int)$pdo->query("SELECT nextval('membership_coupon_number_seq')")->fetchColumn();
+            $ticketNumber='KINO-UND-'.(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('Y').'-'.str_pad((string)$sequence,8,'0',STR_PAD_LEFT);
+            $q=$pdo->prepare('INSERT INTO membership_raffle_coupons(ticket_number,member_id,card_id,issued_by,issued_at) VALUES(?,?,?,?,?) RETURNING id,ticket_number,issued_at');
+            $q->execute([$ticketNumber,$memberId,$cardId,$u['id'],$handedOverAt]); $coupon=$q->fetch();
+            $q=$pdo->prepare('SELECT stamp_slots FROM membership_cards WHERE id=?'); $q->execute([$cardId]); $slots=(int)$q->fetchColumn();
+            $newCard=$issueMembershipCard($pdo,$memberId,$slots,(int)$u['id']);
+            $q=$pdo->prepare('INSERT INTO membership_card_redemptions(card_id,coupon_id,new_card_id,processed_by,idempotency_key,request_hash) VALUES(?,?,?,?,?,?)');
+            $q->execute([$cardId,$coupon['id'],$newCard['id'],$u['id'],$idempotencyKey,$requestHash]);
+            $pdo->commit();
+            json_out(['redemption'=>['ticket_number'=>$coupon['ticket_number'],'issued_at'=>$coupon['issued_at'],'new_card_number'=>$newCard['card_number']],'duplicate'=>false],201);
+        } catch (PDOException $error) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($error->getCode()==='23505') {
+                $duplicate=$loadRedemption($pdo,$idempotencyKey);
+                if ($duplicate) {
+                    if (!hash_equals(trim((string)$duplicate['request_hash']),$requestHash)) json_out(['error'=>'Kunci penyerahan sudah digunakan untuk kartu lain.'],409);
+                    unset($duplicate['request_hash']); json_out(['redemption'=>$duplicate,'duplicate'=>true]);
+                }
+            }
+            throw $error;
+        }
+    }
+    if ($method === 'GET' && $path === '/api/owner/membership/coupons') {
+        require_user('owner');
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $q=$pdo->query("SELECT rc.id,rc.ticket_number,rc.issued_at,mc.card_number,m.member_number,c.name,c.phone,mt.name AS membership_type,mt.card_color
+          FROM membership_raffle_coupons rc JOIN membership_members m ON m.id=rc.member_id
+          JOIN customers c ON c.id=m.customer_id JOIN membership_types mt ON mt.id=m.membership_type_id
+          JOIN membership_cards mc ON mc.id=rc.card_id ORDER BY rc.issued_at DESC,rc.id DESC");
+        json_out(['items'=>$q->fetchAll()]);
     }
     if ($method === 'GET' && $path === '/api/inventory/movements') {
         $u=require_user(); if (!in_array($u['role'],['owner','kasir'],true)) json_out(['error'=>'Anda tidak memiliki akses ke inventaris.'],403);
@@ -545,6 +814,14 @@ try {
             if(count(array_filter($records,static fn(array $row):bool=>in_array($row['status'],['izin','sakit','alpha'],true)))>0)$leave++;
         }
         json_out(['items'=>$items,'summary'=>['employees'=>count($employeeRows),'present'=>$present,'not_checked_in'=>$notCheckedIn,'leave'=>$leave]]);
+    }
+    if ($method === 'GET' && $path === '/api/owner/membership/summary') {
+        require_user('owner');
+        $pdo=db(); $requireMembershipSchema($pdo);
+        $activeMembers=(int)$pdo->query("SELECT COUNT(*) FROM membership_members WHERE status='aktif'")->fetchColumn();
+        $fullCards=(int)$pdo->query("SELECT COUNT(*) FROM membership_cards mc WHERE mc.status='aktif' AND (SELECT COUNT(*) FROM membership_stamps ms WHERE ms.card_id=mc.id)>=mc.stamp_slots")->fetchColumn();
+        $coupons=(int)$pdo->query('SELECT COUNT(*) FROM membership_raffle_coupons')->fetchColumn();
+        json_out(['active_members'=>$activeMembers,'full_cards'=>$fullCards,'raffle_coupons'=>$coupons]);
     }
     if ($method === 'GET' && $path === '/api/owner/dashboard') {
         require_user('owner'); $outletId=$ownerOutletId(); [$start,$end,$period]=$ownerDateRange(); $from=$start->format('Y-m-d H:i:sP'); $until=$end->format('Y-m-d H:i:sP');
@@ -1060,7 +1337,7 @@ try {
             c.name AS customer,c.phone,
             COALESCE(p.amount,0) AS paid_amount,p.paid_at,p.confirmation_method,
             u.name AS cashier,
-            (SELECT json_agg(json_build_object('description',ti.description,'item_type',ti.item_type,'quantity',ti.quantity,'unit_price',ti.unit_price,'subtotal',ti.subtotal,'category',COALESCE(s.category,pr.category)))
+            (SELECT json_agg(json_build_object('description',ti.description,'item_type',ti.item_type,'quantity',ti.quantity,'unit_price',ti.unit_price,'subtotal',ti.subtotal,'weight_kg',ti.weight_kg,'washer_machine_count',ti.washer_machine_count,'dryer_machine_count',ti.dryer_machine_count,'category',COALESCE(s.category,pr.category)))
              FROM transaction_items ti
              LEFT JOIN services s ON s.id=ti.service_id
              LEFT JOIN products pr ON pr.id=ti.product_id
@@ -1095,7 +1372,7 @@ try {
           WHERE t.id=? AND t.outlet_id=?");
         $q->execute([(int)$matches[1],(int)$u['outlet_id']]); $transaction=$q->fetch();
         if (!$transaction) json_out(['error'=>'Transaksi tidak ditemukan.'],404);
-        $q=$pdo->prepare("SELECT ti.item_type,ti.description,ti.quantity,ti.unit_price,ti.subtotal,s.category AS service_category,p.category AS product_category
+        $q=$pdo->prepare("SELECT ti.item_type,ti.description,ti.quantity,ti.unit_price,ti.subtotal,ti.weight_kg,ti.washer_machine_count,ti.dryer_machine_count,s.category AS service_category,p.category AS product_category
           FROM transaction_items ti LEFT JOIN services s ON s.id=ti.service_id LEFT JOIN products p ON p.id=ti.product_id
           WHERE ti.transaction_id=? ORDER BY ti.id");
         $q->execute([$transaction['id']]); $transaction['items']=$q->fetchAll();
@@ -1117,8 +1394,20 @@ try {
         $existing=$loadExisting($pdo,$idempotencyKey,(int)$u['outlet_id']);
         if ($existing) {
             if (!hash_equals(trim((string)$existing['request_hash']),$requestHash)) json_out(['error'=>'Kunci transaksi sudah digunakan dengan data berbeda.'],409);
-            unset($existing['request_hash']); json_out(['transaction'=>$existing,'change'=>(float)$existing['change_amount'],'duplicate'=>true]);
+            $membershipStamp=null;
+            if ($membershipSchemaReady($pdo)) {
+                $q=$pdo->prepare("SELECT TRUE AS stamped,'awarded' AS reason,'Stempel membership berhasil diberikan pada transaksi ini.' AS message,mc.card_number
+                  FROM membership_stamps ms JOIN membership_cards mc ON mc.id=ms.card_id WHERE ms.transaction_id=?");
+                $q->execute([$existing['id']]); $membershipStamp=$q->fetch()?:null;
+            }
+            unset($existing['request_hash']); json_out(['transaction'=>$existing,'change'=>(float)$existing['change_amount'],'duplicate'=>true,'membership_stamp'=>$membershipStamp]);
         }
+        $membershipMemberId=null;
+        if (isset($i['membership_member_id']) && $i['membership_member_id']!=='') {
+            $membershipMemberId=filter_var($i['membership_member_id'],FILTER_VALIDATE_INT);
+            if (!$membershipMemberId || $membershipMemberId<1) json_out(['error'=>'Member transaksi tidak valid.'],422);
+        }
+        if ($membershipMemberId!==null) $requireMembershipSchema($pdo);
         $customerName=trim((string)($i['customer_name']??''));
         $customerPhone=trim((string)($i['customer_phone']??''));
         $notes=trim((string)($i['notes']??''));
@@ -1126,7 +1415,7 @@ try {
         $customerPhoneLength=preg_match_all('/./us',$customerPhone);
         $notesLength=preg_match_all('/./us',$notes);
         if ($customerNameLength===false || $customerPhoneLength===false || $notesLength===false || $customerNameLength>100 || $customerPhoneLength>30 || $notesLength>2000) json_out(['error'=>'Data pelanggan atau catatan melebihi batas panjang.'],422);
-        if ($customerPhone!=='' && $customerName==='') json_out(['error'=>'Nama pelanggan wajib diisi jika nomor telepon dicatat.'],422);
+        if ($membershipMemberId===null && $customerPhone!=='' && $customerName==='') json_out(['error'=>'Nama pelanggan wajib diisi jika nomor telepon dicatat.'],422);
         $weightInput=$i['weight_kg']??null;
         $weight=null;
         if ($weightInput!==null && $weightInput!=='') {
@@ -1143,9 +1432,20 @@ try {
         $q=$pdo->prepare("SELECT id FROM shifts WHERE user_id=? AND outlet_id=? AND status='open' FOR UPDATE");
         $q->execute([$u['id'],$u['outlet_id']]); $shift=$q->fetch();
         if (!$shift) { $pdo->rollBack(); json_out(['error'=>'Buka shift sebelum membuat transaksi.'],409); }
-        $subtotal=0.0; $resolved=[]; $serviceCategories=[]; $primarySelfServices=[]; $reservedStock=[]; $hasExtraDry=false;
+        $customerId=null; $membershipMember=null;
+        if ($membershipMemberId!==null) {
+            $q=$pdo->prepare("SELECT m.id,m.customer_id,m.status,m.verification_status,mt.requires_verification
+              FROM membership_members m JOIN membership_types mt ON mt.id=m.membership_type_id
+              WHERE m.id=? FOR UPDATE OF m");
+            $q->execute([$membershipMemberId]); $membershipMember=$q->fetch();
+            if (!$membershipMember || $membershipMember['status']!=='aktif' || ($dbBoolean($membershipMember['requires_verification']) && $membershipMember['verification_status']!=='verified')) {
+                $pdo->rollBack(); json_out(['error'=>'Member tidak aktif atau belum terverifikasi.'],409);
+            }
+            $customerId=(int)$membershipMember['customer_id'];
+        }
+        $subtotal=0.0; $resolved=[]; $serviceCategories=[]; $serviceCodes=[]; $reservedStock=[]; $selfServiceWeight=0.0;
+        $washerMachineCount=0; $dryerMachineCount=0;
         $coinRequirements=['Koin Reguler'=>0,'Koin Extra Dry'=>0];
-        $machineCountForWeight=$weight===null?0:(int)ceil($weight/7);
         $night=(int)(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('G')>=23 || (int)(new DateTimeImmutable('now',new DateTimeZone('Asia/Jakarta')))->format('G')<6;
         foreach ($lines as $line) {
             if (!is_array($line)) { $pdo->rollBack(); json_out(['error'=>'Format item transaksi tidak valid.'],422); }
@@ -1158,11 +1458,7 @@ try {
                     COALESCE((SELECT price FROM service_prices WHERE service_id=s.id AND price_type=? AND is_active ORDER BY id DESC LIMIT 1),s.base_price) AS price
                     FROM services s WHERE s.id=? AND s.is_active");
                 $q->execute([$night?'malam':'normal',(int)$line['service_id']]); $item=$q->fetch(); $itemType='service';
-                if ($item) {
-                    $serviceCategories[$item['category']]=true;
-                    if ($item['category']==='Self Service' && in_array($item['code'],['SELF-CUCI','SELF-KERING','SELF-CUCI-KERING'],true)) $primarySelfServices[$item['code']]=true;
-                    if ($item['category']==='Self Service' && $item['code']==='SELF-EXTRA-DRY') $hasExtraDry=true;
-                }
+                if ($item) { $serviceCategories[$item['category']]=true; $serviceCodes[$item['code']]=true; }
             } elseif (!empty($line['product_id']) && empty($line['service_id'])) {
                 $q=$pdo->prepare('SELECT id,name,category,price,stock,unit FROM products WHERE id=? AND is_active FOR UPDATE');
                 $q->execute([(int)$line['product_id']]); $item=$q->fetch(); $itemType='product';
@@ -1173,40 +1469,65 @@ try {
             }
             if (!$item) { $pdo->rollBack(); json_out(['error'=>'Item tidak ditemukan atau tidak aktif.'],422); }
             $effectiveQty=$itemType==='service' && $item['pricing_unit']==='kg' ? $qty*($weight??0) : $qty;
-            if ($itemType==='service' && $item['category']==='Self Service' && $item['pricing_unit']==='siklus') {
-                if (floor($qty)!==$qty) { $pdo->rollBack(); json_out(['error'=>'Jumlah siklus Self Service harus berupa bilangan bulat.'],422); }
-                if ($weight!==null) $effectiveQty=$qty*$machineCountForWeight;
-                $coinQuantity=(int)($qty*$machineCountForWeight);
-                if ($item['code']==='SELF-CUCI' || $item['code']==='SELF-KERING') $coinRequirements['Koin Reguler']+=$coinQuantity;
-                elseif ($item['code']==='SELF-CUCI-KERING') $coinRequirements['Koin Reguler']+=$coinQuantity*2;
-                elseif ($item['code']==='SELF-EXTRA-DRY') $coinRequirements['Koin Extra Dry']+=$coinQuantity;
+            $itemWeight=null; $itemWashers=null; $itemDryers=null;
+            if ($itemType==='service' && $item['category']==='Self Service') {
+                $lineWeightInput=$line['weight_kg']??null;
+                if ($qty!==1.0 || !is_numeric($lineWeightInput) || !is_finite((float)$lineWeightInput)
+                    || (float)$lineWeightInput<=0 || (float)$lineWeightInput>9999.99) {
+                    $pdo->rollBack(); json_out(['error'=>'Setiap baris Self Service harus memiliki berat valid dan dikirim sebagai satu layanan.'],422);
+                }
+                $itemWeight=round((float)$lineWeightInput,2);
+                $machines=self_service_line_machines($item['code'],$itemWeight);
+                $machineCount=max($machines['washer'],$machines['dryer']);
+                $effectiveQty=$machineCount;
+                $selfServiceWeight+=$itemWeight;
+                $itemWashers=$machines['washer'];
+                $itemDryers=$machines['dryer'];
+                $washerMachineCount+=$itemWashers;
+                $dryerMachineCount+=$itemDryers;
+                if ($item['code']==='SELF-CUCI' || $item['code']==='SELF-KERING') $coinRequirements['Koin Reguler']+=$machineCount;
+                elseif ($item['code']==='SELF-CUCI-KERING') $coinRequirements['Koin Reguler']+=$machineCount*2;
+                elseif ($item['code']==='SELF-EXTRA-DRY') $coinRequirements['Koin Extra Dry']+=$machineCount;
+            }
+            if ($itemType==='service' && $item['code']==='DROP-KERING') {
+                if ($qty!==1.0) { $pdo->rollBack(); json_out(['error'=>'Jumlah layanan Kering saja dihitung dari berat dan tidak dapat diubah manual.'],422); }
+                $itemWeight=$weight;
+                $effectiveQty=$weight===null?0:dropoff_dry_unit_count($weight);
             }
             if ($effectiveQty<=0) { $pdo->rollBack(); json_out(['error'=>'Masukkan berat laundry lebih besar dari nol untuk layanan per kilogram.'],422); }
             $lineTotal=round((float)$item['price']*$effectiveQty,2);
             $subtotal=round($subtotal+$lineTotal,2);
-            $resolved[]=['item'=>$item,'type'=>$itemType,'quantity'=>$effectiveQty,'total'=>$lineTotal];
+            $resolved[]=['item'=>$item,'type'=>$itemType,'quantity'=>$effectiveQty,'total'=>$lineTotal,'weight_kg'=>$itemWeight,'washer_machine_count'=>$itemWashers,'dryer_machine_count'=>$itemDryers];
         }
-        if (count($serviceCategories)>1) { $pdo->rollBack(); json_out(['error'=>'Pisahkan jenis layanan utama yang berbeda ke transaksi terpisah.'],422); }
-        if (count($primarySelfServices)>1) { $pdo->rollBack(); json_out(['error'=>'Pilih hanya satu layanan utama Self Service untuk kelompok cucian ini.'],422); }
-        if ($serviceCategories && $weight===null) { $pdo->rollBack(); json_out(['error'=>'Berat laundry wajib diisi dan harus lebih besar dari nol.'],422); }
+        $categories=array_keys($serviceCategories);
+        $containsDropOff=isset($serviceCategories['Drop Off']) || isset($serviceCategories['Setrika Saja']);
+        if (!membership_service_selection_is_valid($categories,array_keys($serviceCodes))) {
+            if ($containsDropOff) {
+            $pdo->rollBack(); json_out(['error'=>'Kombinasi Drop Off tidak valid. Cuci saja tidak diperbolehkan; layanan gabungan harus mengikuti pilihan yang tersedia.'],422);
+            }
+            $pdo->rollBack(); json_out(['error'=>'Pisahkan jenis layanan utama yang berbeda ke transaksi terpisah.'],422);
+        }
+        if ($serviceCategories && !isset($serviceCategories['Self Service']) && $weight===null) { $pdo->rollBack(); json_out(['error'=>'Berat laundry wajib diisi dan harus lebih besar dari nol.'],422); }
         if ($discount>$subtotal) { $pdo->rollBack(); json_out(['error'=>'Diskon tidak boleh melebihi subtotal layanan dan produk.'],422); }
         $total=round($subtotal+$deliveryFee-$discount,2);
         $cashInput=$i['cash_received']??0;
         if (!is_numeric($cashInput) || !is_finite((float)$cashInput) || (float)$cashInput<0) { $pdo->rollBack(); json_out(['error'=>'Nominal uang diterima tidak valid.'],422); }
         $cash=round((float)$cashInput,2);
         if ($methodPay==='tunai' && $cash<$total) { $pdo->rollBack(); json_out(['error'=>'Uang tunai yang diterima belum mencukupi.'],422); }
-        $machineCount=null; $dryerMachineCount=null;
-        if ($weight!==null && (isset($primarySelfServices['SELF-CUCI']) || isset($primarySelfServices['SELF-CUCI-KERING']))) $machineCount=$machineCountForWeight;
-        if ($weight!==null && (isset($primarySelfServices['SELF-KERING']) || isset($primarySelfServices['SELF-CUCI-KERING']) || $hasExtraDry)) $dryerMachineCount=$machineCountForWeight;
+        $machineCount=null; $transactionWeight=$weight;
+        if (isset($serviceCategories['Self Service'])) {
+            $transactionWeight=round($selfServiceWeight,2);
+            $machineCount=$washerMachineCount;
+        }
+        $transactionDryerCount=isset($serviceCategories['Self Service'])?$dryerMachineCount:null;
         $type='product'; $serviceType=null;
         if ($serviceCategories) {
-            $serviceType=(string)array_key_first($serviceCategories);
-            $type=$serviceType==='Drop Off'?'drop_off':($serviceType==='Self Service'?'self_service':'laundry');
+            $serviceType=isset($serviceCategories['Drop Off'])?'Drop Off':(string)array_key_first($serviceCategories);
+            $type=isset($serviceCategories['Drop Off'])||isset($serviceCategories['Setrika Saja'])?'drop_off':($serviceType==='Self Service'?'self_service':'laundry');
         }
         $paymentStatus=$methodPay==='tunai'?'lunas':'belum_bayar';
         $cashChange=$methodPay==='tunai'?round($cash-$total,2):0.0;
-        $customerId=null;
-        if ($customerName!=='') {
+        if ($customerId===null && $customerName!=='') {
             $q=$pdo->prepare('INSERT INTO customers(name,phone) VALUES(?,?) RETURNING id');
             $q->execute([$customerName,$customerPhone?:null]); $customerId=(int)$q->fetchColumn();
         }
@@ -1215,7 +1536,7 @@ try {
         try {
             $q=$pdo->prepare("INSERT INTO transactions(id,outlet_id,transaction_number,customer_id,cashier_id,shift_id,transaction_type,subtotal,discount_amount,delivery_fee,total,notes,weight_kg,washer_machine_count,dryer_machine_count,payment_method,cash_received,change_amount,idempotency_key,request_hash,payment_status,status)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'aktif') RETURNING id,transaction_number,total,payment_status,payment_method,created_at,change_amount,washer_machine_count,dryer_machine_count");
-            $q->execute([$nextId,$u['outlet_id'],$number,$customerId,$u['id'],$shift['id'],$type,$subtotal,$discount,$deliveryFee,$total,$notes?:null,$weight,$machineCount,$dryerMachineCount,$methodPay,$methodPay==='tunai'?$cash:0,$cashChange,$idempotencyKey,$requestHash,$paymentStatus]);
+            $q->execute([$nextId,$u['outlet_id'],$number,$customerId,$u['id'],$shift['id'],$type,$subtotal,$discount,$deliveryFee,$total,$notes?:null,$transactionWeight,$machineCount,$transactionDryerCount,$methodPay,$methodPay==='tunai'?$cash:0,$cashChange,$idempotencyKey,$requestHash,$paymentStatus]);
             $trx=$q->fetch();
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
@@ -1223,15 +1544,18 @@ try {
                 $duplicate=$loadExisting($pdo,$idempotencyKey,(int)$u['outlet_id']);
                 if ($duplicate) {
                     if (!hash_equals(trim((string)$duplicate['request_hash']),$requestHash)) json_out(['error'=>'Kunci transaksi sudah digunakan dengan data berbeda.'],409);
-                    unset($duplicate['request_hash']); json_out(['transaction'=>$duplicate,'change'=>(float)$duplicate['change_amount'],'duplicate'=>true]);
+                    $q=$pdo->prepare("SELECT TRUE AS stamped,'awarded' AS reason,'Stempel membership berhasil diberikan pada transaksi ini.' AS message,mc.card_number
+                      FROM membership_stamps ms JOIN membership_cards mc ON mc.id=ms.card_id WHERE ms.transaction_id=?");
+                    $q->execute([$duplicate['id']]); $membershipStamp=$q->fetch()?:null;
+                    unset($duplicate['request_hash']); json_out(['transaction'=>$duplicate,'change'=>(float)$duplicate['change_amount'],'duplicate'=>true,'membership_stamp'=>$membershipStamp]);
                 }
             }
             throw $e;
         }
         foreach ($resolved as $r) {
             if ($r['type']==='service') {
-                $q=$pdo->prepare("INSERT INTO transaction_items(transaction_id,item_type,service_id,description,quantity,unit_price,subtotal) VALUES(?,'service',?,?,?,?,?)");
-                $q->execute([$trx['id'],$r['item']['id'],$r['item']['name'],$r['quantity'],$r['item']['price'],$r['total']]);
+                $q=$pdo->prepare("INSERT INTO transaction_items(transaction_id,item_type,service_id,description,quantity,unit_price,subtotal,weight_kg,washer_machine_count,dryer_machine_count) VALUES(?, 'service', ?, ?, ?, ?, ?, ?, ?, ?)");
+                $q->execute([$trx['id'],$r['item']['id'],$r['item']['name'],$r['quantity'],$r['item']['price'],$r['total'],$r['weight_kg'],$r['washer_machine_count'],$r['dryer_machine_count']]);
             } else {
                 $q=$pdo->prepare("INSERT INTO transaction_items(transaction_id,item_type,product_id,description,quantity,unit_price,subtotal) VALUES(?,'product',?,?,?,?,?)");
                 $q->execute([$trx['id'],$r['item']['id'],$r['item']['name'],$r['quantity'],$r['item']['price'],$r['total']]);
@@ -1266,8 +1590,32 @@ try {
             $q=$pdo->prepare("INSERT INTO laundry_order_status_history(laundry_order_id,new_status,changed_by) VALUES(?,'menunggu',?)");
             $q->execute([$orderId,$u['id']]);
         }
+        $membershipStamp=null;
+        if ($membershipMemberId!==null && $type==='self_service') {
+            $operatingDate=$membershipToday();
+            $q=$pdo->prepare('SELECT id FROM membership_stamps WHERE member_id=? AND operating_date=?'); $q->execute([$membershipMemberId,$operatingDate]); $alreadyStamped=(bool)$q->fetchColumn();
+            $q=$pdo->prepare("SELECT id,card_number,stamp_slots,(SELECT COUNT(*) FROM membership_stamps ms WHERE ms.card_id=membership_cards.id) AS stamp_count
+              FROM membership_cards WHERE member_id=? AND status='aktif' FOR UPDATE");
+            $q->execute([$membershipMemberId]); $activeCard=$q->fetch();
+            if (!$activeCard) { $pdo->rollBack(); json_out(['error'=>'Kartu aktif member tidak ditemukan. Hubungi Owner sebelum melanjutkan.'],409); }
+            $stampOutcome=membership_stamp_outcome(true,true,$alreadyStamped,(int)$activeCard['stamp_count'],(int)$activeCard['stamp_slots']);
+            if ($stampOutcome==='already_stamped') {
+                $membershipStamp=['stamped'=>false,'reason'=>'already_stamped','message'=>'Member sudah mendapatkan stempel hari ini.'];
+            } elseif ($stampOutcome==='card_full') {
+                $membershipStamp=['stamped'=>false,'reason'=>'card_full','message'=>'Kartu member sudah penuh. Serahkan kartu untuk mendapatkan kupon dan kartu baru.','card_number'=>$activeCard['card_number']];
+            } else {
+                $q=$pdo->prepare('INSERT INTO membership_stamps(member_id,card_id,transaction_id,operating_date,created_by) VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING RETURNING id');
+                $q->execute([$membershipMemberId,$activeCard['id'],$trx['id'],$operatingDate,$u['id']]); $stampId=$q->fetchColumn();
+                if ($stampId) {
+                    $nextStampCount=(int)$activeCard['stamp_count']+1;
+                    $membershipStamp=['stamped'=>true,'reason'=>'awarded','message'=>$nextStampCount>=(int)$activeCard['stamp_slots']?'Stempel terakhir berhasil diberikan. Kartu penuh; serahkan untuk mendapatkan kupon dan kartu baru.':'Stempel membership berhasil diberikan.','card_number'=>$activeCard['card_number'],'stamp_count'=>$nextStampCount,'stamp_slots'=>(int)$activeCard['stamp_slots'],'card_full'=>$nextStampCount>=(int)$activeCard['stamp_slots']];
+                } else {
+                    $membershipStamp=['stamped'=>false,'reason'=>'already_stamped','message'=>'Member sudah mendapatkan stempel hari ini.'];
+                }
+            }
+        }
         $pdo->commit();
-        json_out(['transaction'=>$trx,'change'=>$cashChange,'duplicate'=>false],201);
+        json_out(['transaction'=>$trx,'change'=>$cashChange,'duplicate'=>false,'membership_stamp'=>$membershipStamp],201);
     }
     json_out(['error'=>'Endpoint tidak ditemukan.'],404);
 } catch (Throwable $e) {

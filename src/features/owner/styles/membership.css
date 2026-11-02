@@ -1,0 +1,72 @@
+.owner-membership{display:grid;gap:15px;color:var(--owner-text)}
+.membership-page-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px}
+.membership-kicker{color:#16845c;font-size:8px;font-weight:800;letter-spacing:1.2px}
+.membership-page-heading h1{margin:5px 0;font:700 23px 'Plus Jakarta Sans',sans-serif;letter-spacing:-.7px}
+.membership-page-heading p,.membership-panel-heading p{margin:0;color:var(--owner-muted);font-size:10px;line-height:1.6}
+.membership-summary{display:grid;gap:2px;min-width:100px;padding:10px 14px;border:1px solid var(--owner-line);border-radius:11px;background:var(--owner-surface);text-align:right}
+.membership-summary b{font:700 19px 'Plus Jakarta Sans',sans-serif}
+.membership-summary span{font-size:8px;color:var(--owner-muted)}
+.membership-tabs{display:flex;gap:5px;padding:4px;border:1px solid var(--owner-line);border-radius:10px;background:var(--owner-surface);width:max-content;max-width:100%;overflow:auto}
+.membership-tabs button,.membership-secondary,.membership-primary{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:7px;padding:8px 11px;background:transparent;color:var(--owner-muted);font:600 9px 'DM Sans',sans-serif;white-space:nowrap;cursor:pointer}
+.membership-tabs button.active{background:#e8f7ef;color:#116b49}
+.owner-portal.dark .membership-tabs button.active{background:#16382d;color:#8ae0b8}
+.membership-panel{min-width:0;padding:14px;border:1px solid var(--owner-line);border-radius:12px;background:var(--owner-surface);box-shadow:var(--owner-shadow)}
+.membership-toolbar,.membership-panel-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.membership-search{display:flex;align-items:center;gap:8px;min-width:min(420px,100%);height:36px;padding:0 6px 0 10px;border:1px solid var(--owner-line);border-radius:8px;color:var(--owner-muted)}
+.membership-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--owner-text);font:10px 'DM Sans',sans-serif}
+.membership-search button{padding:6px 11px;border:0;border-radius:6px;background:var(--owner-soft);color:var(--owner-text);font:600 9px 'DM Sans',sans-serif}
+.membership-primary{background:#15845c;color:#fff}
+.membership-primary:hover{background:#116f4d}
+.membership-primary:disabled{opacity:.5;cursor:not-allowed}
+.membership-secondary{border-color:var(--owner-line);background:var(--owner-surface);color:var(--owner-text)}
+.membership-primary.compact{padding:7px 9px;font-size:8px}
+.membership-panel-heading h2{margin:0 0 4px;font:700 14px 'Plus Jakarta Sans',sans-serif}
+.membership-table-wrap{width:100%;overflow:auto}
+.membership-table{width:100%;border-collapse:collapse;min-width:730px;text-align:left}
+.membership-table th{padding:9px 8px;border-bottom:1px solid var(--owner-line);color:var(--owner-muted);font-size:8px;font-weight:700;white-space:nowrap}
+.membership-table td{padding:10px 8px;border-bottom:1px solid var(--owner-line);font-size:9px;vertical-align:middle}
+.membership-table tbody tr:last-child td{border-bottom:0}
+.membership-table td>b,.membership-table td>small,.membership-table td>span+small{display:block}
+.membership-table td small{margin-top:4px;color:var(--owner-muted);font-size:8px;line-height:1.45}
+.membership-type,.membership-status{display:inline-flex!important;align-items:center;width:max-content;padding:4px 7px;border-radius:20px;font-size:8px;font-weight:700}
+.membership-type.green{background:#e6f7ee;color:#15704e}
+.membership-type.yellow{background:#fff5d8;color:#8b6813}
+.owner-portal.dark .membership-type.green{background:#153a2d;color:#8ae0b8}
+.owner-portal.dark .membership-type.yellow{background:#47391b;color:#f5d477}
+.membership-status.aktif{background:#e6f7ee;color:#15704e}
+.membership-status.pending{background:#fff5d8;color:#8b6813}
+.membership-status.nonaktif,.membership-status.diserahkan{background:#eff1f5;color:#6a7484}
+.owner-portal.dark .membership-status.aktif{background:#153a2d;color:#8ae0b8}
+.owner-portal.dark .membership-status.pending{background:#47391b;color:#f5d477}
+.membership-row-actions{display:flex;align-items:center;gap:3px}
+.membership-row-actions button{width:27px;height:27px;display:grid;place-items:center;border:1px solid var(--owner-line);border-radius:6px;background:var(--owner-surface);color:var(--owner-muted);cursor:pointer}
+.membership-row-actions button:hover{color:#15845c;border-color:#94d0b4}
+.membership-row-actions button.danger:hover{color:#c34343;border-color:#e4a0a0}
+.membership-progress{width:112px;display:grid;gap:5px;color:#15704e}
+.membership-progress.yellow{color:#8b6813}
+.membership-progress>div{display:flex;justify-content:space-between;gap:5px;font-size:8px}
+.membership-progress>div b{font-weight:700}
+.membership-progress-track{height:5px;overflow:hidden;border-radius:9px;background:#e8eee9}
+.membership-progress-track i{height:100%;display:block;border-radius:9px;background:#1a9b69}
+.membership-progress.yellow .membership-progress-track{background:#f2ecd9}
+.membership-progress.yellow .membership-progress-track i{background:#d7aa26}
+.membership-empty{padding:24px 12px;color:var(--owner-muted);text-align:center;font-size:10px}
+.membership-error{padding:9px 11px;border:1px solid #f1c1c1;border-radius:8px;background:#fff2f2;color:#a23a3a;font-size:9px}
+.owner-portal.dark .membership-error{background:#3b1e25;color:#ffb5b5;border-color:#63323b}
+.membership-overlay{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:18px;background:#11182777}
+.membership-dialog{width:min(470px,100%);max-height:min(85vh,760px);overflow:auto;padding:17px;border:1px solid var(--owner-line);border-radius:13px;background:var(--owner-surface);color:var(--owner-text);box-shadow:0 20px 60px #0003}
+.membership-dialog header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:15px}
+.membership-dialog header h2{margin:0 0 4px;font:700 15px 'Plus Jakarta Sans',sans-serif}
+.membership-dialog header p{margin:0;color:var(--owner-muted);font-size:9px}
+.membership-dialog header button{width:29px;height:29px;display:grid;place-items:center;border:1px solid var(--owner-line);border-radius:7px;background:transparent;color:var(--owner-muted);cursor:pointer}
+.membership-dialog>label{display:grid;gap:6px;margin:12px 0;color:var(--owner-text);font-size:9px;font-weight:700}
+.membership-dialog input:not([type=checkbox]),.membership-dialog select{width:100%;min-height:36px;padding:8px 9px;border:1px solid var(--owner-line);border-radius:7px;background:var(--owner-bg);color:var(--owner-text);font:10px 'DM Sans',sans-serif}
+.membership-dialog .membership-checkbox{display:flex;align-items:flex-start;gap:8px;font-weight:500;line-height:1.5}
+.membership-dialog .membership-checkbox input{margin-top:2px;accent-color:#15845c}
+.membership-dialog footer{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.membership-history-dialog{width:min(620px,100%)}
+.membership-history-list{display:grid;gap:8px}
+.membership-history-list article{display:grid;grid-template-columns:1fr auto;gap:5px;padding:10px;border:1px solid var(--owner-line);border-radius:8px}
+.membership-history-list article>div{display:grid;gap:3px}
+.membership-history-list article>small{grid-column:1/-1;color:var(--owner-muted);font-size:8px}
+@media(max-width:720px){.membership-page-heading{align-items:flex-start}.membership-page-heading h1{font-size:20px}.membership-summary{min-width:82px;padding:8px}.membership-toolbar,.membership-panel-heading{align-items:stretch;flex-direction:column}.membership-search{min-width:0;width:100%}.membership-toolbar>.membership-primary,.membership-panel-heading>.membership-primary,.membership-panel-heading>.membership-secondary{align-self:flex-start}.membership-panel{padding:10px}.membership-tabs{width:100%}.membership-tabs button{flex:1;padding:8px 7px;font-size:8px}}

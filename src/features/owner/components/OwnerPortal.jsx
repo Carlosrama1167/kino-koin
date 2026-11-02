@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { BarChart3, Check, FileSpreadsheet, LayoutDashboard, LogOut, Moon, Settings2, SlidersHorizontal, Sun, Users, WashingMachine } from 'lucide-react'
+import { BarChart3, Check, FileSpreadsheet, LayoutDashboard, LogOut, Moon, Settings2, SlidersHorizontal, Sun, Ticket, Users, WashingMachine } from 'lucide-react'
 import OwnerDashboard from './OwnerDashboard'
 import OwnerModule from './OwnerModule'
 import AttendanceAdmin from './AttendanceAdmin'
 
 const navigation = [
   { name: 'Dashboard Owner', label: 'Ringkasan', icon: LayoutDashboard },
+  { name: 'Manajemen Membership', label: 'Membership', icon: Ticket },
   { name: 'Laporan Keuangan', label: 'Laporan Keuangan', icon: BarChart3 },
   { name: 'Manajemen Karyawan & Shift', label: 'Karyawan & Shift', icon: Users },
   { name: 'Manajemen Harga & Promo', label: 'Harga & Promo', icon: SlidersHorizontal },

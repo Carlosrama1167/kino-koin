@@ -1,0 +1,46 @@
+.cashier-membership-picker{display:grid;gap:8px;padding:11px;border:1px solid #dfe8e3;border-radius:10px;background:#f8fbf9}
+.cashier-membership-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cashier-membership-heading>div,.cashier-selected-copy{display:grid;gap:3px}
+.cashier-membership-heading b,.cashier-membership-register-heading b{font-size:10px;color:#243b31}
+.cashier-membership-heading small,.cashier-selected-copy small{color:#73847b;font-size:8px;line-height:1.45}
+.membership-register-toggle,.cashier-verify-member,.membership-handover{display:inline-flex;align-items:center;justify-content:center;gap:5px;border:1px solid #cfe0d6;border-radius:6px;padding:6px 8px;background:#fff;color:#267b55;font:600 8px 'DM Sans',sans-serif;cursor:pointer}
+.cashier-membership-search{position:relative;display:flex;align-items:center;gap:8px;min-height:37px;padding:0 10px;border:1px solid #dce5df;border-radius:7px;background:#fff;color:#84938a}
+.cashier-membership-search>input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#25382e;font:9px 'DM Sans',sans-serif}
+.cashier-membership-search>span{font-size:8px;white-space:nowrap}
+.cashier-member-results{position:absolute;z-index:25;top:calc(100% + 5px);left:0;right:0;display:grid;max-height:250px;overflow:auto;border:1px solid #dce5df;border-radius:8px;background:#fff;box-shadow:0 12px 30px #152b1d22}
+.cashier-member-results article{display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px;padding:8px;border-bottom:1px solid #edf1ee}
+.cashier-member-results article:last-child{border-bottom:0}
+.cashier-member-result{grid-column:1/-1;width:100%;display:grid;grid-template-columns:1fr auto;align-items:center;gap:3px 7px;border:0;background:transparent;text-align:left;color:#25382e;cursor:pointer}
+.cashier-member-result:disabled{cursor:default}
+.cashier-member-result>span:first-child{display:grid;gap:3px}
+.cashier-member-result b{font-size:9px}
+.cashier-member-result small{color:#84938a;font-size:8px}
+.cashier-member-result>small{grid-column:1/-1}
+.cashier-member-results .membership-type{font-size:7px}
+.cashier-verify-member{grid-column:2;grid-row:1}
+.cashier-selected-member{display:grid;grid-template-columns:1fr auto;align-items:center;gap:7px;padding:9px;border:1px solid #c8e3d2;border-radius:8px;background:#eef8f1}
+.cashier-selected-member.yellow{border-color:#f1dfaa;background:#fff9e8}
+.cashier-selected-copy b{font-size:10px;color:#25382e}
+.cashier-selected-copy .membership-today-note{color:#a46b05;font-weight:700}
+.membership-remove{width:26px;height:26px;display:grid;place-items:center;border:1px solid #d8e2dc;border-radius:6px;background:#fff;color:#73847b;cursor:pointer}
+.membership-handover{grid-column:1/-1;width:max-content;background:#fffaf0;border-color:#f0d99b;color:#8a6716}
+.cashier-membership-hint,.cashier-membership-error{font-size:8px;line-height:1.45}
+.cashier-membership-hint{color:#73847b}
+.cashier-membership-error{color:#b43e3e}
+.cashier-membership-register{display:grid;gap:8px;padding:10px;border:1px solid #dfe8e3;border-radius:8px;background:#fff}
+.cashier-membership-register-heading{display:flex;align-items:center;justify-content:space-between}
+.cashier-membership-register-heading button{display:grid;place-items:center;border:0;background:transparent;color:#84938a}
+.cashier-membership-register label{display:grid;gap:4px;color:#64766c;font-size:8px;font-weight:700}
+.cashier-membership-register input:not([type=checkbox]),.cashier-membership-register select{width:100%;min-height:32px;padding:6px 8px;border:1px solid #dce5df;border-radius:6px;background:#fff;color:#25382e;font:9px 'DM Sans',sans-serif}
+.cashier-membership-register .cashier-membership-check{display:flex;align-items:flex-start;gap:6px;line-height:1.45;font-weight:500}
+.cashier-membership-register .cashier-membership-check input{margin-top:1px;accent-color:#218756}
+.membership-register-submit{min-height:33px;border:0;border-radius:6px;background:#188452;color:#fff;font:700 9px 'DM Sans',sans-serif}
+.membership-register-submit:disabled{opacity:.55}
+.app-shell.dark .cashier-membership-picker{border-color:#32443a;background:#18251e}
+.app-shell.dark .cashier-membership-heading b,.app-shell.dark .cashier-selected-copy b,.app-shell.dark .cashier-member-result{color:#e8f3ec}
+.app-shell.dark .cashier-membership-heading small,.app-shell.dark .cashier-selected-copy small,.app-shell.dark .cashier-member-result small{color:#a2b3a8}
+.app-shell.dark .cashier-membership-search,.app-shell.dark .cashier-member-results,.app-shell.dark .cashier-membership-register,.app-shell.dark .cashier-membership-register input:not([type=checkbox]),.app-shell.dark .cashier-membership-register select{border-color:#3a4b41;background:#202e26;color:#e8f3ec}
+.app-shell.dark .cashier-member-results article{border-color:#35453b}
+.app-shell.dark .cashier-selected-member{border-color:#42694f;background:#1c3425}
+.app-shell.dark .cashier-selected-member.yellow{border-color:#75602b;background:#342c18}
+@media(max-width:640px){.cashier-membership-picker{padding:9px}.cashier-membership-search{min-height:35px}}

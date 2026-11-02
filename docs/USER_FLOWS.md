@@ -13,7 +13,7 @@ Dokumen ini menggambarkan alur yang tersedia pada kode saat audit 31 Oktober 202
 ## Owner: dashboard dan laporan
 
 1. Owner memilih halaman melalui navigasi state di `OwnerPortal`.
-2. Dashboard meminta `/api/owner/dashboard` untuk transaksi lunas, pembayaran, order, layanan, stok/koin, kehadiran, dan sesi shift terbaru.
+2. Dashboard meminta `/api/owner/dashboard` untuk transaksi lunas, pembayaran, order, layanan, stok/koin, kehadiran, dan sesi shift terbaru, serta `/api/owner/membership/summary` untuk jumlah member aktif, kartu penuh, dan kupon undian.
 3. Owner memilih periode; filter Kuartal masih ada pada Dashboard dan Laporan Keuangan saat audit.
 4. Laporan Keuangan meminta `/api/owner/finance` untuk daftar transaksi dan ringkasan pembayaran.
 5. UI menyatakan data pengeluaran belum tersedia; dashboard/laporan tidak menghitung pengeluaran sebagai penerimaan atau laba.
@@ -45,7 +45,18 @@ Satu akun Kasir aktif ditemukan pada database lokal. Namun `shifts.user_id` adal
 3. Pengguna mencatat masuk/pulang melalui `/api/attendance/check-in` dan `/api/attendance/check-out`.
 4. Server menyimpan ke `employee_attendance`; belum ada API Owner untuk membuat atau mengubah akun Karyawan.
 
-## Alur yang direncanakan, belum aktif
+## Membership, kartu, dan undian
+
+1. Owner atau Kasir mendaftarkan member Reguler atau Pelajar/Mahasiswa. Reguler langsung aktif; Pelajar hanya aktif setelah petugas mencatat verifikasi. Kartu pertama diterbitkan ketika member aktif.
+2. Pada checkout, Kasir mencari member menurut nama, telepon, atau nomor member. Memilih member menautkan transaksi ke pelanggan kanonis yang dibuat saat pendaftaran; harga dan diskon tidak berubah.
+3. Jika transaksi aktif berisi satu atau beberapa layanan Self Service, checkout mencoba memberi satu stempel dalam transaksi database yang sama. Constraint unik dan penguncian member membatasi satu stempel per tanggal operasional Jakarta. Drop Off tidak memberi stempel.
+4. Progres kartu mengikuti snapshot slot fisik: 12 untuk Reguler dan 6 untuk Pelajar/Mahasiswa. Setelah penuh, Owner atau Kasir mencatat penyerahan; sistem mengunci kartu lama, membuat tepat satu kupon, lalu menerbitkan kartu kosong baru secara atomik.
+5. Owner melihat anggota, riwayat Self Service, kartu, kupon, dan mengunduh rekap peserta CSV. Sistem tidak memilih pemenang otomatis.
+6. Untuk database existing, API membership baru siap digunakan setelah migration berurutan pada [README-backend.md](../README-backend.md) diterapkan.
+
+## Checkout layanan
+
+Self Service dapat menggabungkan Cuci, Kering, dan Cuci + Kering dalam satu transaksi. Berat tiap baris diisi pada layar Detail & pembayaran, bukan di keranjang; layar tersebut menampilkan total berat dan jumlah mesin berdasarkan kapasitas 7 kg per mesin. Konfirmasi transaksi menyediakan struk cetak yang memuat rincian, total berat, dan status pembayaran. Layanan Drop Off divalidasi terpisah. Drop Off Kering saja dikenakan Rp12.000 per 7 kg atau bagian dari 7 kg, sama siang dan malam.
 
 Pengeluaran, penautan expense dengan penerimaan stok, rekonsiliasi kas/koin, penugasan karyawan ke shift, CRUD produk/promo, sinkronisasi Sheets, dan upload foto profil belum boleh dianggap tersedia sebelum backend, database, hak akses, serta pengujiannya diimplementasikan.
 

@@ -32,16 +32,21 @@ Login menggunakan session cookie PHP, verifikasi `password_hash`, `session_regen
 
 ## Database dan alur data
 
-Tabel utama: `users`, `outlets`, `shifts`, `shift_schedules`, `employee_attendance`, `services`, `service_prices`, `products`, `transactions`, `transaction_items`, `payments`, `laundry_orders`, `coin_movements`, `inventory_movements`, dan `sync_jobs`.
+Tabel utama: `users`, `outlets`, `shifts`, `shift_schedules`, `employee_attendance`, `services`, `service_prices`, `products`, `transactions`, `transaction_items`, `payments`, `laundry_orders`, `membership_types`, `membership_members`, `membership_cards`, `membership_stamps`, `membership_raffle_coupons`, `membership_card_redemptions`, `coin_movements`, `inventory_movements`, dan `sync_jobs`.
 
 POS membaca layanan/produk dari API; checkout menghitung harga dari database, memvalidasi shift dan stok, lalu menyimpan transaksi/item/pembayaran serta mutasi terkait dalam transaksi PostgreSQL. Riwayat dan dashboard Owner juga menggunakan endpoint aktual. Tabel `sync_jobs` ada, tetapi belum ditemukan worker atau endpoint sinkronisasi Google Sheets.
+
+Checkout Self Service menyimpan berat serta jumlah washer/dryer per baris layanan, menghitung mesin per baris dengan kapasitas 7 kg, dan tetap melarang pencampuran kategori Self Service dan Drop Off. Database yang sudah ada perlu menjalankan migration `20261102_001_self_service_line_weights.sql`.
+
+Membership memakai `customers` sebagai identitas kanonis dan menautkan checkout melalui `transactions.customer_id`; tidak ada stempel retrospektif. Unique constraint membatasi stempel/member/hari dan kupon/kartu, sementara kunci idempotensi melindungi pendaftaran serta serah-terima. Owner dan Kasir memiliki operasi berbeda yang dibatasi backend berdasarkan role. Migration `20261102_002_membership_and_dropoff_dry.sql` menambahkan tabel membership dan layanan Drop Off Kering.
 
 ## Batas kondisi yang telah diverifikasi
 
 - Endpoint Owner memilih outlet aktif pertama; jangan mengasumsikan dukungan multi-outlet yang terisolasi.
 - `shifts.user_id` saat ini merepresentasikan akun login Kasir, belum karyawan yang ditugaskan.
-- Tidak ada tabel expense/promo/membership/rekonsiliasi kas fisik atau metadata foto profil di schema saat ini.
+- Schema mencakup membership dan expense setelah migration baru diterapkan; promo, rekonsiliasi kas fisik, dan metadata foto profil belum tersedia.
 - Metadata database lokal pada saat audit: 12 layanan aktif, 0 produk, satu akun Owner aktif, satu akun Kasir aktif, belum ada akun Karyawan aktif; tidak ada absensi atau job sinkronisasi. Database produksi tidak diperiksa.
+- Source aplikasi memuat fitur membership; PostgreSQL existing belum diubah sampai migration `20261102_002_membership_and_dropoff_dry.sql` diterapkan. Audit, rancangan, dan keputusan bisnis ada di [MEMBERSHIP_AUDIT.md](./MEMBERSHIP_AUDIT.md).
 
 ## Referensi
 

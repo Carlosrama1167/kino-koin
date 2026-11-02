@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { AlertCircle, Download, FileSpreadsheet, Search, Settings2, ShieldCheck, SlidersHorizontal, Wallet } from 'lucide-react'
 import { api } from '../../../shared/api'
 import { ExpenseForm } from '../../../shared/ExpenseManagement'
+import OwnerMembership from './OwnerMembership'
 
 const periods = [['today', 'Hari ini'], ['7days', '7 hari terakhir'], ['month', 'Bulan ini'], ['custom', 'Kustom']]
 const money = value => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value || 0))
@@ -14,6 +15,7 @@ const csvCell = value => {
 }
 
 export default function OwnerModule({ page, notify }) {
+  if (page === 'Manajemen Membership') return <OwnerMembership notify={notify}/>
   if (page === 'Laporan Keuangan') return <FinanceReport/>
   if (page === 'Manajemen Harga & Promo') return <PriceManagement notify={notify}/>
   if (page === 'Integrasi Google Sheets') return <IntegrationStatus/>

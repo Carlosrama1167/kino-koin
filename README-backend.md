@@ -17,6 +17,8 @@ Dokumentasi arsitektur, endpoint, skema data, dan alur fitur berdasarkan impleme
 
 Contoh menggunakan psql: `psql -U postgres -d kino_koin -f database/schema.sql` lalu `psql -U postgres -d kino_koin -f database/seed.sql`.
 
+Untuk database yang sudah berjalan, terapkan migration yang belum dijalankan sesuai urutan nama file: `20261102_001_self_service_line_weights.sql`, lalu `20261102_002_membership_and_dropoff_dry.sql`. Schema baru sudah menyertakan perubahan tersebut; migration tidak dijalankan otomatis oleh aplikasi. Fitur Membership di UI/API memerlukan kedua migration pada database existing.
+
 ## Menjalankan aplikasi lokal
 
 Buka dua terminal di folder proyek:
@@ -40,4 +42,4 @@ Buka alamat Vite yang ditampilkan. Frontend meneruskan `/api` ke server PHP. Log
 
 ## Batas fase
 
-Login sesi, katalog layanan, transaksi tunai/QRIS (pencatatan saja, tanpa gateway QRIS), pengurangan stok saat produk terjual, ringkasan Owner, laporan transaksi Owner, daftar absensi, perubahan tarif layanan, profil outlet, shift, dan absensi karyawan terhubung ke PostgreSQL. Pencatatan pengeluaran, promo, dan integrasi Google Sheets belum memiliki skema atau endpoint. Pada POS Kasir, manajemen stok, koin, laporan shift, histori, dan pengelolaan status pesanan masih menggunakan data prototipe dan belum disimpan ke database. Tidak ada API eksternal palsu.
+Login sesi, katalog layanan, transaksi tunai/QRIS (pencatatan saja, tanpa gateway QRIS), pengurangan stok saat produk terjual, ringkasan Owner, laporan transaksi Owner, daftar absensi, perubahan tarif layanan, profil outlet, shift, absensi karyawan, serta source Membership dan Drop Off terhubung ke PostgreSQL. Jalankan migration yang dibutuhkan sebelum menggunakan Self Service per baris dan Membership pada database existing. Pencatatan pengeluaran, promo, dan integrasi Google Sheets belum memiliki skema atau endpoint. Pada POS Kasir, manajemen stok, koin, laporan shift, histori, dan pengelolaan status pesanan masih menggunakan data prototipe dan belum disimpan ke database. Tidak ada API eksternal palsu.

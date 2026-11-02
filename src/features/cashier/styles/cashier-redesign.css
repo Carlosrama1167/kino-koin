@@ -734,6 +734,37 @@
   font-size: 10px;
 }
 
+.line-weight {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.line-weight input {
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.cart-line-remove {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
 .qty-control button {
   width: 34px;
   height: 34px;

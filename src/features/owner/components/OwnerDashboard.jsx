@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Clock3, Coins, Download, FileSpreadsheet, Package, Shirt, Wallet, WashingMachine } from 'lucide-react'
+import { CalendarDays, Clock3, Coins, Download, FileSpreadsheet, Package, Shirt, Ticket, Wallet, WashingMachine } from 'lucide-react'
 import { api } from '../../../shared/api'
 
 const periods = [
@@ -41,6 +41,9 @@ export default function OwnerDashboard({ user, onNavigate, notify }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [refreshVersion, setRefreshVersion] = useState(0)
+  const [membershipSummary, setMembershipSummary] = useState(null)
+  const [membershipLoading, setMembershipLoading] = useState(true)
+  const [membershipError, setMembershipError] = useState('')
 
   const query = useMemo(() => {
     if (period === 'custom' && !appliedRange) return ''
@@ -70,6 +73,15 @@ export default function OwnerDashboard({ user, onNavigate, notify }) {
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [query])
+  useEffect(() => {
+    let active = true
+    setMembershipLoading(true); setMembershipError('')
+    api('/api/owner/membership/summary')
+      .then(result => { if (active) setMembershipSummary(result) })
+      .catch(reason => { if (active) setMembershipError(reason.message) })
+      .finally(() => { if (active) setMembershipLoading(false) })
+    return () => { active = false }
+  }, [refreshVersion])
 
   const orders = data?.orders || []
   const activeOrders = orders
@@ -156,6 +168,18 @@ export default function OwnerDashboard({ user, onNavigate, notify }) {
         <b>{data ? `${data.attendance_today} orang` : loading ? 'Memuat…' : '—'}</b>
         <button className="owner-text-action" onClick={() => onNavigate('Manajemen Karyawan & Shift')}>Lihat kehadiran</button>
       </article>
+    </section>
+    <section className="owner-panel owner-membership-summary">
+      <div className="owner-panel-heading">
+        <div><h3>Membership</h3><p>Ringkasan member aktif, kartu penuh, dan kupon undian.</p></div>
+        <button className="owner-text-action" onClick={() => onNavigate('Manajemen Membership')}>Kelola membership</button>
+      </div>
+      {membershipError ? <div className="owner-state error" role="alert">{membershipError}</div> : membershipLoading ? <div className="owner-state">Memuat ringkasan membership…</div> :
+        <div className="owner-status-list">
+          <div><span>Member aktif</span><b><Ticket size={14}/> {membershipSummary.active_members}</b></div>
+          <div><span>Kartu penuh</span><b>{membershipSummary.full_cards}</b></div>
+          <div><span>Kupon undian</span><b>{membershipSummary.raffle_coupons}</b></div>
+        </div>}
     </section>
     <p className="owner-data-note">Laporan Keuangan memisahkan transaksi, pembayaran, dan pengeluaran. Ledger pengeluaran aktif setelah migration diterapkan.</p>
 

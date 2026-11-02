@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { BookOpen, ChevronDown, CircleHelp, Search, ShoppingCart, Coins, CreditCard, Shirt } from 'lucide-react'
 
 const guides = [
-  { category: 'Transaksi', question: 'Bagaimana cara membuat transaksi Self Service?', answer: 'Pilih Transaksi Baru, buka kategori Self Service, lalu pilih layanan. Periksa jumlah pada keranjang dan lanjutkan ke Bayar sekarang. Koin dicatat sesuai siklus mesin pada nota.' },
+  { category: 'Transaksi', question: 'Bagaimana cara membuat transaksi Self Service?', answer: 'Pilih Transaksi Baru, buka kategori Self Service, lalu pilih layanan. Buka Detail & pembayaran untuk mengisi berat tiap layanan dan memeriksa total berat serta jumlah mesin sebelum menyimpan transaksi. Setelah berhasil, struk dapat dicetak dari konfirmasi transaksi.' },
   { category: 'Transaksi', question: 'Bagaimana harga malam dihitung?', answer: 'Harga malam berlaku pukul 23.00 sampai 05.59 WIB untuk Self Service Cuci + Kering dan Drop Off Cuci + Kering. Tema terang atau gelap tidak mengubah harga.' },
   { category: 'Pembayaran', question: 'Apa yang terjadi jika Drop Off belum dibayar?', answer: 'Pesanan tetap berstatus Belum Bayar. Nilai tagihan tidak dihitung sebagai uang diterima sampai pembayaran dicatat.' },
   { category: 'Pesanan', question: 'Bagaimana cara memperbarui status pesanan?', answer: 'Buka Pesanan Laundry, pilih pesanan untuk melihat detail, lalu gunakan tombol Perbarui status. Pada prototipe, perubahan hanya berlaku selama sesi browser.' },
