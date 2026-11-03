@@ -27,6 +27,7 @@ export default function TransactionHistory({ notify }) {
   const [error, setError] = useState('')
   const [selected, setSelected] = useState(null)
   const [confirming, setConfirming] = useState(false)
+  const [qrisConfirmOpen, setQrisConfirmOpen] = useState(false)
   const [refreshVersion, setRefreshVersion] = useState(0)
   const [settlementMethod, setSettlementMethod] = useState('qris')
   const [settlementCash, setSettlementCash] = useState('')
@@ -74,7 +75,6 @@ export default function TransactionHistory({ notify }) {
   const pick = (tx) => setSelected(tx)
   const settlePayment = async () => {
     if (!selected) return
-    if (settlementMethod === 'qris' && !window.confirm('Pastikan dana QRIS telah masuk sebelum mengonfirmasi pembayaran secara manual.')) return
     setConfirming(true)
     setError('')
     try {
@@ -85,9 +85,11 @@ export default function TransactionHistory({ notify }) {
           ...(settlementMethod === 'tunai' ? { cash_received: Number(settlementCash || 0) } : {}),
         }),
       })
+      setQrisConfirmOpen(false)
       notify(settlementMethod === 'qris' ? 'Pembayaran QRIS dicatat sebagai konfirmasi manual kasir.' : 'Pembayaran tunai berhasil dicatat.')
       setRefreshVersion(value => value + 1)
     } catch (reason) {
+      setQrisConfirmOpen(false)
       setError(reason.message)
     } finally {
       setConfirming(false)
@@ -122,9 +124,23 @@ export default function TransactionHistory({ notify }) {
       <div className="history-table-footer"><span>Menampilkan <b>{firstItem}–{lastItem}</b> dari <b>{data?.total || 0}</b> transaksi</span><div><button disabled={page<=1 || loading} onClick={() => setPage(current => current-1)}>‹</button><button className="page-active">{page}</button><button disabled={page>=pages || loading} onClick={() => setPage(current => current+1)}>›</button></div></div>
     </section>
       <aside className="receipt-preview"><div className="receipt-preview-head"><div><div className="receipt-heading-icon"><ReceiptText size={17}/></div><span><b>Pratinjau nota</b><small>{selected?.id || 'Pilih transaksi'}</small></span></div><button className="icon-button" onClick={() => notify('Cetak struk belum dikonfigurasi.')} aria-label="Cetak ulang"><Printer size={16}/></button></div>{selected ? <><div className="thermal-paper"><div className="receipt-brand-mark"><WashingMachine size={19}/></div><b className="receipt-brand">KINO LAUNDRY</b><small className="receipt-tagline">Bersih, wangi, setiap hari</small><div className="receipt-dash"/><div className="receipt-meta"><div><span>No. Nota</span><b>{selected.id}</b></div><div><span>Tanggal</span><b>{dateLabel(selected.date)} · {selected.time}</b></div><div><span>Kasir</span><b>{selected.cashier}</b></div><div><span>Pelanggan</span><b>{selected.customer}</b></div></div><div className="receipt-dash"/><div className="receipt-line-item"><span>{selected.items}</span><b>{money(selected.total)}</b></div><small className="receipt-line-detail">{selected.detail}</small><div className="receipt-dash"/><div className="receipt-total"><span>Subtotal</span><b>{money(selected.subtotal)}</b></div>{selected.deliveryFee > 0 && <div className="receipt-pay-info"><span>Ongkir</span><b>{money(selected.deliveryFee)}</b></div>}{selected.discountAmount > 0 && <div className="receipt-pay-info"><span>Diskon</span><b>− {money(selected.discountAmount)}</b></div>}<div className="receipt-total"><span>Total</span><b>{money(selected.total)}</b></div><div className="receipt-pay-info"><span>Metode pembayaran</span><b>{selected.method}</b></div><div className="receipt-pay-info"><span>Status pembayaran</span><b className={selected.paymentStatus === 'Lunas' ? 'receipt-paid' : 'receipt-pending'}>{selected.paymentStatus}</b></div>{selected.method === 'Tunai' && selected.paymentStatus === 'Lunas' && <><div className="receipt-pay-info"><span>Uang diterima</span><b>{money(selected.tendered)}</b></div><div className="receipt-pay-info"><span>Kembalian</span><b>{money(selected.change)}</b></div></>}<div className="receipt-dash"/>{selected.notes && <small className="receipt-line-detail">Catatan: {selected.notes}</small>}<p className="receipt-thanks">Terima kasih telah menggunakan KINO Laundry.</p></div><button className="btn btn-primary receipt-print" onClick={() => notify('Cetak struk belum dikonfigurasi.')}><Printer size={16}/> Cetak ulang struk</button><div className="receipt-hint">Pratinjau transaksi tersimpan · Tidak mengirim ke printer</div></> : <div className="receipt-no-selection">Pilih transaksi untuk melihat pratinjau nota.</div>}</aside></div>
-    {selected?.paymentStatus === 'Belum Bayar' && <div className="history-footnote"><Wallet size={14}/>{selected.method === 'QRIS' ? 'Pastikan dana QRIS telah masuk; pencatatan ini adalah konfirmasi manual kasir, bukan verifikasi provider.' : 'Pilih metode pembayaran dan catat penerimaan saat dana diterima.'}{selected.method === 'Belum dipilih' && <select value={settlementMethod} onChange={event => setSettlementMethod(event.target.value)} aria-label="Metode pelunasan"><option value="tunai">Tunai</option><option value="qris">QRIS</option></select>}{settlementMethod === 'tunai' && <input type="number" min={selected.total} step="0.01" value={settlementCash} onChange={event => setSettlementCash(event.target.value)} placeholder="Uang diterima" aria-label="Uang tunai diterima"/>}<button className="btn btn-primary" onClick={settlePayment} disabled={confirming || (settlementMethod === 'tunai' && Number(settlementCash || 0) < selected.total)}>{confirming ? 'Mencatat…' : settlementMethod === 'qris' ? 'Konfirmasi QRIS manual' : 'Catat pembayaran tunai'}</button></div>}
+    {selected?.paymentStatus === 'Belum Bayar' && <div className="history-footnote"><Wallet size={14}/>{selected.method === 'QRIS' ? 'Pastikan dana QRIS telah masuk; pencatatan ini adalah konfirmasi manual kasir, bukan verifikasi provider.' : 'Pilih metode pembayaran dan catat penerimaan saat dana diterima.'}{selected.method === 'Belum dipilih' && <select value={settlementMethod} onChange={event => setSettlementMethod(event.target.value)} aria-label="Metode pelunasan"><option value="tunai">Tunai</option><option value="qris">QRIS</option></select>}{settlementMethod === 'tunai' && <input type="number" min={selected.total} step="0.01" value={settlementCash} onChange={event => setSettlementCash(event.target.value)} placeholder="Uang diterima" aria-label="Uang tunai diterima"/>}<button className="btn btn-primary" onClick={() => settlementMethod === 'qris' ? setQrisConfirmOpen(true) : settlePayment()} disabled={confirming || (settlementMethod === 'tunai' && Number(settlementCash || 0) < selected.total)}>{confirming ? 'Mencatat…' : settlementMethod === 'qris' ? 'Konfirmasi QRIS manual' : 'Catat pembayaran tunai'}</button></div>}
     {selected?.manualConfirmation && <div className="history-footnote"><Wallet size={14}/> Pembayaran QRIS tercatat melalui konfirmasi manual kasir, bukan verifikasi otomatis provider.</div>}
     <div className="history-footnote"><Wallet size={14}/> Nilai “Pembayaran diterima” hanya menghitung pembayaran yang tercatat. Tagihan belum dibayar tidak dihitung sebagai penerimaan.</div>
+    {qrisConfirmOpen && selected && <div className="shift-close-confirm-backdrop qris-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !confirming && setQrisConfirmOpen(false)}>
+      <section className="shift-close-confirm-modal qris-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="history-qris-confirm-title" tabIndex={-1} onKeyDown={event => event.key === 'Escape' && !confirming && setQrisConfirmOpen(false)}>
+        <div className="qris-confirm-icon"><CreditCard size={22}/></div>
+        <div className="shift-close-confirm-kicker">KONFIRMASI PEMBAYARAN QRIS</div>
+        <h2 id="history-qris-confirm-title">Pastikan pembayaran diterima</h2>
+        <p>Dengarkan speaker pembayaran dan cocokkan nominal sebelum melanjutkan.</p>
+        <div className="qris-confirm-amount"><span>{selected.id}</span><b>{money(selected.total)}</b></div>
+        <div className="shift-close-confirm-note">Jika speaker belum berbunyi atau nominal tidak sesuai, batalkan konfirmasi.</div>
+        <div className="shift-close-confirm-actions">
+          <button className="btn btn-secondary" type="button" onClick={() => setQrisConfirmOpen(false)} disabled={confirming}>Kembali</button>
+          <button className="btn btn-primary" type="button" onClick={settlePayment} disabled={confirming}>{confirming ? 'Mencatat pembayaran…' : 'Ya, dana sudah masuk'}</button>
+        </div>
+      </section>
+    </div>}
   </div>
 }
 

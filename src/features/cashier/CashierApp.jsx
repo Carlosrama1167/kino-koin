@@ -32,6 +32,7 @@ export default function App({ user, onLogout }) {
   const [selectedMember, setSelectedMember] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [checkoutError, setCheckoutError] = useState('')
+  const [qrisConfirmOpen, setQrisConfirmOpen] = useState(false)
   const [success, setSuccess] = useState(null)
   const requestRef = useRef(null)
   const toastTimerRef = useRef(null)
@@ -174,7 +175,6 @@ export default function App({ user, onLogout }) {
   const removeLine = cartKey => setCart(current => current.filter(i => i.cartKey !== cartKey))
   const selectNav = (name) => { setActive(name); setMobileMenu(false) }
   const paid = async (paymentMethod = method === 'QRIS' ? 'qris' : 'tunai', confirmQris = false) => {
-    if (confirmQris && !window.confirm('Pastikan speaker pembayaran berbunyi dan dana QRIS telah masuk sebelum mengonfirmasi pembayaran.')) return
     const payload = {
       payment_method: paymentMethod,
       cash_received: paymentMethod === 'tunai' ? Number(cash || 0) : 0,
@@ -262,8 +262,10 @@ export default function App({ user, onLogout }) {
         },
       })
       setSelectedMember(null)
+      setQrisConfirmOpen(false)
     } catch (error) {
       setCheckoutError(error.message)
+      setQrisConfirmOpen(false)
     } finally {
       setSubmitting(false)
     }
@@ -361,12 +363,26 @@ export default function App({ user, onLogout }) {
       {method === 'Tunai' ? <div className="cash-section"><label>Uang diterima<input value={cash} onChange={e => setCash(e.target.value)} placeholder="Masukkan nominal" inputMode="numeric" /></label><div className="quick-cash">{[total, 50000, 100000].filter((v, i, a) => v > 0 && a.indexOf(v) === i).map(n => <button key={n} onClick={() => setCash(String(n))}>{n === total ? 'Uang pas' : money(n)}</button>)}</div><div className="change-row"><span>Kembalian</span><b>{money(Math.max(0, Number(cash || 0) - total))}</b></div></div> : <div className="qris-box"><CreditCard size={21}/><span><b>Konfirmasi QRIS melalui speaker</b><small>Tunggu speaker pembayaran berbunyi dan pastikan nominal sesuai. Setelah itu pilih konfirmasi QRIS. Jika belum terdengar, simpan transaksi sebagai belum dibayar.</small></span></div>}
       {!checkoutWeightsValid && <div className="checkout-error" role="alert">Isi berat yang valid untuk setiap baris layanan sebelum menyimpan transaksi.</div>}
       {checkoutError && <div className="checkout-error" role="alert">{checkoutError}</div>}
-      <button className="btn btn-primary confirm-payment" onClick={() => paid(method === 'QRIS' ? 'qris' : 'tunai', method === 'QRIS')} disabled={submitting || !checkoutWeightsValid || (method === 'Tunai' && Number(cash || 0) < total) || (method === 'QRIS' && total <= 0)}><Check size={17}/>{submitting ? 'Menyimpan transaksi…' : method === 'Tunai' ? 'Konfirmasi pembayaran tunai' : 'Speaker berbunyi · Konfirmasi QRIS'}</button>
+      <button className="btn btn-primary confirm-payment" onClick={() => method === 'QRIS' ? setQrisConfirmOpen(true) : paid('tunai')} disabled={submitting || !checkoutWeightsValid || (method === 'Tunai' && Number(cash || 0) < total) || (method === 'QRIS' && total <= 0)}><Check size={17}/>{submitting ? 'Menyimpan transaksi…' : method === 'Tunai' ? 'Konfirmasi pembayaran tunai' : 'Speaker berbunyi · Konfirmasi QRIS'}</button>
       <button className="btn btn-secondary confirm-payment" onClick={() => paid(method === 'QRIS' ? 'qris' : null)} disabled={submitting || !checkoutWeightsValid}>{submitting ? 'Menyimpan transaksi…' : method === 'QRIS' ? 'Simpan QRIS belum dibayar' : 'Simpan sebagai belum dibayar'}</button>
       <div className="modal-secure"><Check size={13}/> Keranjang hanya dikosongkan setelah transaksi berhasil disimpan.</div>
       </div>
       </div>
     </section></div>}
+    {qrisConfirmOpen && <div className="shift-close-confirm-backdrop qris-confirm-backdrop" onMouseDown={event => event.target === event.currentTarget && !submitting && setQrisConfirmOpen(false)}>
+      <section className="shift-close-confirm-modal qris-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="qris-confirm-title" tabIndex={-1} onKeyDown={event => event.key === 'Escape' && !submitting && setQrisConfirmOpen(false)}>
+        <div className="qris-confirm-icon"><CreditCard size={22}/></div>
+        <div className="shift-close-confirm-kicker">KONFIRMASI PEMBAYARAN QRIS</div>
+        <h2 id="qris-confirm-title">Pastikan pembayaran diterima</h2>
+        <p>Dengarkan speaker pembayaran dan cocokkan nominal sebelum melanjutkan.</p>
+        <div className="qris-confirm-amount"><span>Total tagihan</span><b>{money(total)}</b></div>
+        <div className="shift-close-confirm-note">Jika speaker belum berbunyi atau nominal tidak sesuai, batalkan konfirmasi. Transaksi dapat disimpan sebagai belum dibayar.</div>
+        <div className="shift-close-confirm-actions">
+          <button className="btn btn-secondary" type="button" onClick={() => setQrisConfirmOpen(false)} disabled={submitting}>Kembali</button>
+          <button className="btn btn-primary" type="button" onClick={() => paid('qris', true)} disabled={submitting}>{submitting ? 'Mencatat pembayaran…' : 'Ya, dana sudah masuk'}</button>
+        </div>
+      </section>
+    </div>}
     {shiftCloseConfirm && <ShiftCloseConfirmation
       shift={shiftCloseConfirm}
       closing={closingShift}
